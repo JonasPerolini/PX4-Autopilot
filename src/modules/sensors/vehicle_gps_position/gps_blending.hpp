@@ -41,11 +41,14 @@
 #include <lib/matrix/matrix/math.hpp>
 #include <px4_platform_common/defines.h>
 #include <uORB/topics/sensor_gps.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/Subscription.hpp>
 
 #include <float.h>
 #include <lib/geo/geo.h>
 #include <lib/mathlib/mathlib.h>
 
+using uORB::SubscriptionData;
 using matrix::Vector2f;
 using math::constrain;
 
@@ -106,6 +109,9 @@ public:
 	const matrix::Vector3f &blended_antenna_offset() const { return _blended_antenna_offset; }
 
 private:
+
+	uORB::Subscription _vehicule_attitude_sub{ORB_ID(vehicle_attitude)};
+
 	/*
 	 * Update the internal state estimate for a blended GPS solution that is a weighted average of the phsyical
 	 * receiver solutions. This internal state cannot be used directly by estimators because if physical receivers

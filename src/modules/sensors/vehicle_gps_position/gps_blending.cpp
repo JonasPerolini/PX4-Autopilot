@@ -492,6 +492,7 @@ void GpsBlending::update_gps_offsets(const sensor_gps_s &gps_blended_state)
 {
 	// Calculate filter coefficients to be applied to the offsets for each GPS position and height offset
 	// A weighting of 1 will make the offset adjust the slowest, a weighting of 0 will make it adjust with zero filtering
+	// A weighting of 0 will make the offset adjust the slowest, a weighting of 1 will make it adjust with zero filtering
 	float alpha[GPS_MAX_RECEIVERS_BLEND] {};
 	float omega_lpf = 1.0f / fmaxf(_blending_time_constant, 1.0f);
 
@@ -600,4 +601,33 @@ void GpsBlending::calc_gps_blend_output(sensor_gps_s &gps_blended_state, matrix:
 	gps_blended_state.lat = (int32_t)(1.0E7 * lat_deg_res);
 	gps_blended_state.lon = (int32_t)(1.0E7 * lon_deg_res);
 	gps_blended_state.alt = gps_blended_state.alt + (int32_t)blended_alt_offset_mm;
+
+	// Get the antenna offset
+	for (uint8_t i = 0; i < GPS_MAX_RECEIVERS_BLEND; i++) {
+		// Compute the offset of each GPS relative to the blended position in NEU
+		matrix::Vector3f offset_ned;
+		get_vector_to_next_waypoint((_gps_state[i].lat / 1.0e7), (_gps_state[i].lon / 1.0e7),
+					    (gps_blended_state.lat / 1.0e7), (gps_blended_state.lon / 1.0e7),
+					    &offset_ned(0), &offset_ned(1));
+
+		offset_ned(2) = -1.0 * (gps_blended_state.alt - _gps_state[i].alt);
+
+		// Transform offset from NED to body frame
+		uORB::Subscription vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+		vehicle_attitude_s attitude{};
+		vehicle_attitude_sub.update(&attitude);
+
+		// Quaternion rotation from the FRD body frame to the NED earth frame
+		const matrix::Dcmf R{matrix::Quatf{attitude.q}};
+
+		matrix::Vector3f offset_body_frd;
+		offset_body_frd = R.transpose() * offset_ned;
+
+		// Get the temp antenna offset between the blended position and the center of the drone according to each GPS
+		matrix::Vector3f temp_antenna_offset = _antenna_offset[i] - offset_body_frd;
+
+		// Since we have measurements errors, the offset between the blended position and the center of the will be different for each GPS
+		// Therefore, we can take a weighted average
+		antenna_offset += temp_antenna_offset * blend_weights[i];
+	}
 }
