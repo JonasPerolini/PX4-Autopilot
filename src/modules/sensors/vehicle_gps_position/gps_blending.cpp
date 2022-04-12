@@ -491,7 +491,6 @@ sensor_gps_s GpsBlending::gps_blend_states(float blend_weights[GPS_MAX_RECEIVERS
 void GpsBlending::update_gps_offsets(const sensor_gps_s &gps_blended_state)
 {
 	// Calculate filter coefficients to be applied to the offsets for each GPS position and height offset
-	// A weighting of 1 will make the offset adjust the slowest, a weighting of 0 will make it adjust with zero filtering
 	// A weighting of 0 will make the offset adjust the slowest, a weighting of 1 will make it adjust with zero filtering
 	float alpha[GPS_MAX_RECEIVERS_BLEND] {};
 	float omega_lpf = 1.0f / fmaxf(_blending_time_constant, 1.0f);
