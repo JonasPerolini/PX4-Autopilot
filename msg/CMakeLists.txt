@@ -105,7 +105,6 @@ set(msg_files
 	iridiumsbd_status.msg
 	irlock_report.msg
 	landing_gear.msg
-	landing_target_innovations.msg
 	landing_target_pose.msg
 	led_control.msg
 	log_message.msg
@@ -162,6 +161,7 @@ set(msg_files
 	sensors_status_imu.msg
 	system_power.msg
 	takeoff_status.msg
+	target_estimator_state.msg
 	task_stack_info.msg
 	tecs_status.msg
 	telemetry_status.msg
