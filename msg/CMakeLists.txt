@@ -106,6 +106,7 @@ set(msg_files
 	irlock_report.msg
 	landing_gear.msg
 	landing_target_pose.msg
+	landing_target_gnss.msg
 	led_control.msg
 	log_message.msg
 	logger_status.msg
