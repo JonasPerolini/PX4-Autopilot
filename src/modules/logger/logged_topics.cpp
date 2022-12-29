@@ -78,6 +78,7 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic("target_GNSS_report", 1000);
 	add_optional_topic("landing_target_pose", 100);
 	add_optional_topic("landing_target_orientation", 100);
+	add_optional_topic("ltest_acc_input", 50);
 	add_optional_topic("target_estimator_state", 100);
 	add_optional_topic("magnetometer_bias_estimate", 200);
 	add_topic("manual_control_setpoint", 200);
