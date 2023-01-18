@@ -74,7 +74,8 @@ void LoggedTopics::add_default_topics()
 	add_topic("input_rc", 500);
 	add_optional_topic("internal_combustion_engine_status", 10);
 	add_optional_topic("irlock_report", 1000);
-	add_optional_topic("fiducial_marker_report", 100);
+	add_optional_topic("fiducial_marker_pos_report", 100);
+	add_optional_topic("fiducial_marker_yaw_report", 100);
 	add_optional_topic("target_GNSS_report", 1000);
 	add_optional_topic("landing_target_pose", 100);
 	add_optional_topic("landing_target_orientation", 100);
