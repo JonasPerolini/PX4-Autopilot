@@ -508,20 +508,23 @@ bool LTEstPosition::processObsVision(const fiducial_marker_pos_report_s &fiducia
 				   fiducial_marker_pose.z_rel_body);
 	const Vector3f vision_ned = quat_att.rotateVector(vision_body);
 
-	const SquareMatrix<float, 3> covMat = diag(Vector3f(fiducial_marker_pose.cov_x_rel_body,
-					      fiducial_marker_pose.cov_y_rel_body,
-					      fiducial_marker_pose.cov_z_rel_body));
-	const matrix::Dcmf R_att = matrix::Dcm<float>(quat_att);
-
 	// Rotate covariance matrix to vc-NED
-	SquareMatrix<float, 3> Cov_rotated = R_att * covMat * R_att.transpose();
+	SquareMatrix<float, 3> Cov_rotated;
 
-	// If the variance was not set, use default
-	if (fiducial_marker_pose.cov_x_rel_body < (float)1e-6 && fiducial_marker_pose.cov_y_rel_body < (float)1e-6
-	    && fiducial_marker_pose.cov_z_rel_body < (float)1e-6) {
+	// Use uncertainty from parameters or from vision messages
+	if (_ev_noise_md) {
 		// Uncertainty proportional to the vertical distance
-		const float meas_uncertainty = _range_sensor.valid ? (_meas_unc * _range_sensor.dist_bottom) : (_meas_unc * 10);
+		const float meas_uncertainty = _range_sensor.valid ? ((_ev_pos_noise * _ev_pos_noise) * fmaxf(_range_sensor.dist_bottom,
+					       1.f)) : ((_ev_pos_noise * _ev_pos_noise) * 10);
 		Cov_rotated = diag(Vector3f(meas_uncertainty, meas_uncertainty, meas_uncertainty));
+
+	} else {
+		const SquareMatrix<float, 3> covMat = diag(Vector3f(fmaxf(fiducial_marker_pose.var_x_rel_body,
+						      _ev_pos_noise * _ev_pos_noise),
+						      fmaxf(fiducial_marker_pose.var_y_rel_body, _ev_pos_noise * _ev_pos_noise),
+						      fmaxf(fiducial_marker_pose.var_z_rel_body, _ev_pos_noise * _ev_pos_noise)));
+		const matrix::Dcmf R_att = matrix::Dcm<float>(quat_att);
+		Cov_rotated = R_att * covMat * R_att.transpose();
 	}
 
 	/* RELATIVE POSITION*/
@@ -566,17 +569,25 @@ bool LTEstPosition::processObsGNSSVelRel(const sensor_gps_s &vehicle_gps_positio
 
 	} else {
 
-		const float unc = vehicle_gps_position.s_variance_m_s * vehicle_gps_position.s_variance_m_s;
+
+		Vector3f vel_uav_ned(vehicle_gps_position.vel_n_m_s, vehicle_gps_position.vel_e_m_s, vehicle_gps_position.vel_d_m_s);
+
+		if (_gps_pos_is_offset) {
+			if ((_velocity_offset_ned.valid)
+			    && ((_velocity_offset_ned.timestamp - vehicle_gps_position.timestamp) < measurement_updated_TIMEOUT_US)) {
+
+				vel_uav_ned -= _velocity_offset_ned.xyz;
+
+			} else {
+				return false;
+			}
+		}
 
 		if (_target_mode == TargetMode::Stationary) {
-			obs.meas_xyz(0) = -vehicle_gps_position.vel_n_m_s;
-			obs.meas_xyz(1) = -vehicle_gps_position.vel_e_m_s;
-			obs.meas_xyz(2) = -vehicle_gps_position.vel_d_m_s;
+			obs.meas_xyz = vel_uav_ned * (-1.f);
 
 		} else if (_target_mode == TargetMode::Moving) {
-			obs.meas_xyz(0) = vehicle_gps_position.vel_n_m_s;
-			obs.meas_xyz(1) = vehicle_gps_position.vel_e_m_s;
-			obs.meas_xyz(2) = vehicle_gps_position.vel_d_m_s;
+			obs.meas_xyz = vel_uav_ned;
 		}
 
 		// h_meas = [rx, ry, rz, r_dotx, r_doty, r_dotz, bx, by, bz, atx, aty, atz]
@@ -586,6 +597,8 @@ bool LTEstPosition::processObsGNSSVelRel(const sensor_gps_s &vehicle_gps_positio
 		obs.meas_h_xyz(1, 4) = 1; // y direction
 		obs.meas_h_xyz(2, 5) = 1; // z direction
 
+		const float unc = fmaxf(vehicle_gps_position.s_variance_m_s * vehicle_gps_position.s_variance_m_s,
+					_gps_vel_noise * _gps_vel_noise);
 		obs.meas_unc_xyz(0) = unc;
 		obs.meas_unc_xyz(1) = unc;
 		obs.meas_unc_xyz(2) = unc;
@@ -618,7 +631,8 @@ bool LTEstPosition::processObsGNSSVelTarget(const landing_target_gnss_s &target_
 		obs.meas_xyz(1) = target_GNSS_report.vel_e_m_s;
 		obs.meas_xyz(2) = target_GNSS_report.vel_d_m_s;
 
-		const float unc = target_GNSS_report.s_variance_m_s * target_GNSS_report.s_variance_m_s;
+		const float unc = fmaxf(target_GNSS_report.s_variance_m_s * target_GNSS_report.s_variance_m_s,
+					_gps_vel_noise * _gps_vel_noise);
 
 		obs.meas_unc_xyz(0) = unc;
 		obs.meas_unc_xyz(1) = unc;
@@ -658,8 +672,13 @@ bool LTEstPosition::processObsGNSSPosMission(const sensor_gps_s &vehicle_gps_pos
 		// Down direction (if the drone is above the target, the relative position is positive)
 		gps_relative_pos(2) = (vehicle_gps_position.alt - _landing_pos.alt) / 1000.f; // transform mm to m
 
-		const float gps_unc_horizontal = vehicle_gps_position.eph * vehicle_gps_position.eph;
-		const float gps_unc_vertical = vehicle_gps_position.epv * vehicle_gps_position.epv;
+		// Offset gps relative position to the center of mass:
+		const Vector3f gps_relative_pos_offset = gps_relative_pos + _gps_pos_offset;
+
+		const float gps_unc_horizontal = fmaxf(vehicle_gps_position.eph * vehicle_gps_position.eph,
+						       _gps_pos_noise * _gps_pos_noise);
+		const float gps_unc_vertical = fmaxf(vehicle_gps_position.epv * vehicle_gps_position.epv,
+						     _gps_pos_noise * _gps_pos_noise);
 
 		// GPS already in NED, no rotation required.
 		// h_meas = [rx, ry, rz, r_dotx, r_doty, r_dotz, bx, by, bz, atx, aty, atz]
@@ -682,7 +701,7 @@ bool LTEstPosition::processObsGNSSPosMission(const sensor_gps_s &vehicle_gps_pos
 
 		obs.timestamp = vehicle_gps_position.timestamp;
 
-		obs.meas_xyz = gps_relative_pos;
+		obs.meas_xyz = gps_relative_pos_offset;
 
 		obs.meas_unc_xyz(0) = gps_unc_horizontal;
 		obs.meas_unc_xyz(1) = gps_unc_horizontal;
@@ -693,9 +712,9 @@ bool LTEstPosition::processObsGNSSPosMission(const sensor_gps_s &vehicle_gps_pos
 		// Keep track of the gps relative position if not already done using the target GPS
 		if ((hrt_absolute_time() - _pos_rel_gnss.timestamp) > measurement_valid_TIMEOUT_US) {
 			_pos_rel_gnss.timestamp = obs.timestamp;
-			_pos_rel_gnss.valid = (PX4_ISFINITE(gps_relative_pos(0)) && PX4_ISFINITE(gps_relative_pos(1))
-					       && PX4_ISFINITE(gps_relative_pos(2)));
-			_pos_rel_gnss.xyz = gps_relative_pos;
+			_pos_rel_gnss.valid = (PX4_ISFINITE(gps_relative_pos_offset(0)) && PX4_ISFINITE(gps_relative_pos_offset(1))
+					       && PX4_ISFINITE(gps_relative_pos_offset(2)));
+			_pos_rel_gnss.xyz = gps_relative_pos_offset;
 		}
 
 		return true;
@@ -741,9 +760,15 @@ bool LTEstPosition::processObsGNSSPosTarget(const landing_target_gnss_s &target_
 		// Down direction (if the drone is above the target, the relative position is positive)
 		gps_relative_pos(2) = (vehicle_gps_position.alt - target_gps_alt) / 1000.f; // transform mm to m
 
+		// Offset gps relative position to the center of mass:
+		const Vector3f gps_relative_pos_offset = gps_relative_pos + _gps_pos_offset;
+
 		// Var(aX - bY) = a^2 Var(X) + b^2Var(Y) - 2ab Cov(X,Y)
-		const float gps_unc_horizontal = vehicle_gps_position.eph * vehicle_gps_position.eph + gps_target_eph * gps_target_eph;
-		const float gps_unc_vertical = vehicle_gps_position.epv * vehicle_gps_position.epv + gps_target_epv * gps_target_epv;
+		const float gps_unc_horizontal = fmaxf(vehicle_gps_position.eph * vehicle_gps_position.eph,
+						       _gps_pos_noise * _gps_pos_noise) + fmaxf(gps_target_eph * gps_target_eph, _gps_pos_noise * _gps_pos_noise);
+		const float gps_unc_vertical = fmaxf(vehicle_gps_position.epv * vehicle_gps_position.epv,
+						     _gps_pos_noise * _gps_pos_noise) + fmaxf(gps_target_epv * gps_target_epv, _gps_pos_noise * _gps_pos_noise);
+
 
 		// GPS already in NED, no rotation required.
 		// h_meas = [rx, ry, rz, r_dotx, r_doty, r_dotz, bx, by, bz, atx, aty, atz]
@@ -766,7 +791,7 @@ bool LTEstPosition::processObsGNSSPosTarget(const landing_target_gnss_s &target_
 
 		obs.timestamp = target_GNSS_report.timestamp;
 
-		obs.meas_xyz = gps_relative_pos;
+		obs.meas_xyz = gps_relative_pos_offset;
 
 		obs.meas_unc_xyz(0) = gps_unc_horizontal;
 		obs.meas_unc_xyz(1) = gps_unc_horizontal;
@@ -776,9 +801,9 @@ bool LTEstPosition::processObsGNSSPosTarget(const landing_target_gnss_s &target_
 
 		// Keep track of the gps relative position
 		_pos_rel_gnss.timestamp = obs.timestamp;
-		_pos_rel_gnss.valid = (PX4_ISFINITE(gps_relative_pos(0)) && PX4_ISFINITE(gps_relative_pos(1))
-				       && PX4_ISFINITE(gps_relative_pos(2)));
-		_pos_rel_gnss.xyz = gps_relative_pos;
+		_pos_rel_gnss.valid = (PX4_ISFINITE(gps_relative_pos_offset(0)) && PX4_ISFINITE(gps_relative_pos_offset(1))
+				       && PX4_ISFINITE(gps_relative_pos_offset(2)));
+		_pos_rel_gnss.xyz = gps_relative_pos_offset;
 
 		return true;
 	}
@@ -1148,6 +1173,14 @@ void LTEstPosition::_check_params(const bool force)
 	}
 }
 
+void LTEstPosition::set_velocity_offset(const matrix::Vector3f &xyz)
+{
+	_velocity_offset_ned.xyz = xyz;
+	_velocity_offset_ned.valid = (PX4_ISFINITE(_velocity_offset_ned.xyz(0)) && PX4_ISFINITE(_velocity_offset_ned.xyz(0))
+				      && PX4_ISFINITE(_velocity_offset_ned.xyz(2)));
+	_velocity_offset_ned.timestamp = hrt_absolute_time();
+}
+
 void LTEstPosition::set_range_sensor(const float dist, const bool valid)
 {
 	_range_sensor.valid = valid;
@@ -1194,6 +1227,23 @@ void LTEstPosition::updateParams()
 	_bias_unc = _param_ltest_bias_unc.get();
 	_meas_unc = _param_ltest_meas_unc.get();
 	_drone_acc_unc = _param_ltest_acc_d_unc.get();
+	_gps_vel_noise = _param_ltest_gps_vel_noise.get();
+	_gps_pos_noise = _param_ltest_gps_pos_noise.get();
+	_ev_noise_md = _param_ltest_ev_noise_md.get();
+	_ev_pos_noise = _param_ltest_ev_pos_noise.get();
+
+	float gps_pos_x;
+	param_get(param_find("EKF2_GPS_POS_X"), &gps_pos_x);
+
+	float gps_pos_y;
+	param_get(param_find("EKF2_GPS_POS_Y"), &gps_pos_y);
+
+	float gps_pos_z;
+	param_get(param_find("EKF2_GPS_POS_Z"), &gps_pos_z);
+
+	_gps_pos_offset = matrix::Vector3f(gps_pos_x, gps_pos_y, gps_pos_z);
+	_gps_pos_is_offset = (gps_pos_x + gps_pos_y + gps_pos_z > 0.01f);
+
 }
 
 bool LTEstPosition::selectTargetEstimator()
