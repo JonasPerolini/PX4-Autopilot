@@ -87,8 +87,6 @@ set(msg_files
 	Event.msg
 	FailsafeFlags.msg
 	FailureDetectorStatus.msg
-	FiducialMarkerPosReport.msg
-	FiducialMarkerYawReport.msg
 	FollowTarget.msg
 	FollowTargetEstimator.msg
 	FollowTargetStatus.msg
@@ -186,7 +184,6 @@ set(msg_files
 	SensorUwb.msg
 	SystemPower.msg
 	TakeoffStatus.msg
-	TargetGnss.msg
 	TaskStackInfo.msg
 	TecsStatus.msg
 	TelemetryStatus.msg
@@ -228,13 +225,20 @@ set(msg_files
 	VehicleTorqueSetpoint.msg
 	VehicleTrajectoryBezier.msg
 	VehicleTrajectoryWaypoint.msg
-	VisionTargetEstPosition.msg
-	VisionTargetEstOrientation.msg
 	VtolVehicleStatus.msg
 	Wind.msg
 	YawEstimatorStatus.msg
 )
 list(SORT msg_files)
+
+if(NOT CONSTRAINED_FLASH)
+	list(APPEND msg_files
+		TargetGnss.msg
+		VisionTargetEstPosition.msg
+		VisionTargetEstOrientation.msg
+		FiducialMarkerPosReport.msg
+		FiducialMarkerYawReport.msg)
+endif()
 
 px4_list_make_absolute(msg_files ${CMAKE_CURRENT_SOURCE_DIR} ${msg_files})
 
