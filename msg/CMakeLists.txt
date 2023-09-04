@@ -87,6 +87,8 @@ set(msg_files
 	Event.msg
 	FailsafeFlags.msg
 	FailureDetectorStatus.msg
+	FiducialMarkerPosReport.msg
+	FiducialMarkerYawReport.msg
 	FollowTarget.msg
 	FollowTargetEstimator.msg
 	FollowTargetStatus.msg
@@ -152,6 +154,7 @@ set(msg_files
 	PowerButtonState.msg
 	PowerMonitor.msg
 	PpsCapture.msg
+	PrecLandStatus.msg
 	PwmInput.msg
 	Px4ioStatus.msg
 	QshellReq.msg
@@ -183,6 +186,7 @@ set(msg_files
 	SensorUwb.msg
 	SystemPower.msg
 	TakeoffStatus.msg
+	TargetGnss.msg
 	TaskStackInfo.msg
 	TecsStatus.msg
 	TelemetryStatus.msg
@@ -224,6 +228,8 @@ set(msg_files
 	VehicleTorqueSetpoint.msg
 	VehicleTrajectoryBezier.msg
 	VehicleTrajectoryWaypoint.msg
+	VisionTargetEstPosition.msg
+	VisionTargetEstOrientation.msg
 	VtolVehicleStatus.msg
 	Wind.msg
 	YawEstimatorStatus.msg
