@@ -61,6 +61,7 @@
 #include <uORB/topics/mission_result.h>
 #include <uORB/topics/navigator_mission_item.h>
 #include <uORB/topics/position_setpoint_triplet.h>
+#include <uORB/topics/prec_land_status.h>
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_roi.h>
@@ -316,6 +317,8 @@ private:
 	)
 
 	uORB::Publication<navigator_mission_item_s> _navigator_mission_item_pub{ORB_ID::navigator_mission_item};
+	uORB::Publication<prec_land_status_s> _prec_land_status_pub{ORB_ID(prec_land_status)};
+	void _publish_prec_land_status(const bool prec_land_ongoing);
 
 	uORB::Subscription	_mission_sub{ORB_ID(mission)};		/**< mission subscription */
 	mission_s		_mission {};

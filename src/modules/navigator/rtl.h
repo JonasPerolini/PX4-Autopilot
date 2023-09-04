@@ -48,6 +48,7 @@
 
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/home_position.h>
+#include <uORB/topics/prec_land_status.h>
 #include <uORB/topics/rtl_time_estimate.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/wind.h>
@@ -216,6 +217,8 @@ private:
 
 	uORB::SubscriptionData<wind_s>		_wind_sub{ORB_ID(wind)};
 	uORB::Publication<rtl_time_estimate_s> _rtl_time_estimate_pub{ORB_ID(rtl_time_estimate)};
+	uORB::Publication<prec_land_status_s> _prec_land_status_pub{ORB_ID(prec_land_status)};
+	void _publish_prec_land_status(const bool prec_land_ongoing);
 };
 
 float time_to_home(const matrix::Vector3f &to_home_vec,

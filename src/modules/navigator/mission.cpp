@@ -189,6 +189,7 @@ Mission::on_inactivation()
 
 	if (_navigator->get_precland()->is_activated()) {
 		_navigator->get_precland()->on_inactivation();
+		_publish_prec_land_status(false);
 	}
 
 	/* reset so current mission item gets restarted if mission was paused */
@@ -355,9 +356,11 @@ Mission::on_active()
 
 	if (_work_item_type == WORK_ITEM_TYPE_PRECISION_LAND) {
 		_navigator->get_precland()->on_active();
+		_publish_prec_land_status(true);
 
 	} else if (_navigator->get_precland()->is_activated()) {
 		_navigator->get_precland()->on_inactivation();
+		_publish_prec_land_status(false);
 	}
 }
 
@@ -2019,6 +2022,21 @@ void Mission::publish_navigator_mission_item()
 	navigator_mission_item.timestamp = hrt_absolute_time();
 
 	_navigator_mission_item_pub.publish(navigator_mission_item);
+}
+
+void Mission::_publish_prec_land_status(const bool prec_land_ongoing)
+{
+	prec_land_status_s prec_land_status{};
+
+	if (prec_land_ongoing) {
+		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_ONGOING;
+
+	} else {
+		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_STOPPED;
+	}
+
+	prec_land_status.nav_state = (int)_navigator->get_precland()->get_prec_land_nav_state();
+	_prec_land_status_pub.publish(prec_land_status);
 }
 
 bool Mission::getPreviousPositionItemIndex(const mission_s &mission, int inactivation_index,
