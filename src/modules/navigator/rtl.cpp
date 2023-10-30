@@ -527,20 +527,3 @@ bool RTL::hasMissionLandStart()
 {
 	return _mission_sub.get().land_start_index > 0;
 }
-
-#if !defined(CONSTRAINED_FLASH)
-void RTL::_publish_prec_land_status(const bool prec_land_ongoing)
-{
-	prec_land_status_s prec_land_status{};
-
-	if (prec_land_ongoing) {
-		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_ONGOING;
-
-	} else {
-		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_STOPPED;
-	}
-
-	prec_land_status.nav_state = (int)_navigator->get_precland()->get_prec_land_nav_state();
-	_prec_land_status_pub.publish(prec_land_status);
-}
-#endif
