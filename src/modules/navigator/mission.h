@@ -103,5 +103,4 @@ private:
 				  size_t &num_found_items);
 
 	bool _need_mission_save{false};
-
 };

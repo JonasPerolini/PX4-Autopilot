@@ -242,7 +242,7 @@ private:
 	uORB::SubscriptionData<vehicle_local_position_s> _local_pos_sub{ORB_ID(vehicle_local_position)};	/**< vehicle status subscription */
 	uORB::SubscriptionData<wind_s>		_wind_sub{ORB_ID(wind)};
 #if !defined(CONSTRAINED_FLASH)
-	uORB::Publication<prec_land_status_s> _prec_land_status_pub{ORB_ID(prec_land_status)};
+	uORB::Publication<prec_land_status_s> _prec_land_status_pub {ORB_ID(prec_land_status)};
 	void _publish_prec_land_status(const bool prec_land_ongoing);
 #endif
 };
