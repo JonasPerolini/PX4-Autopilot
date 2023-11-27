@@ -194,9 +194,6 @@ MissionBase::on_inactivation()
 
 	if (_navigator->get_precland()->is_activated()) {
 		_navigator->get_precland()->on_inactivation();
-#if !defined(CONSTRAINED_FLASH)
-		_publish_prec_land_status(false);
-#endif
 	}
 
 	/* reset so current mission item gets restarted if mission was paused */
@@ -352,15 +349,9 @@ MissionBase::on_active()
 
 	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_PRECISION_LAND) {
 		_navigator->get_precland()->on_active();
-#if !defined(CONSTRAINED_FLASH)
-		_publish_prec_land_status(true);
-#endif
 
 	} else if (_navigator->get_precland()->is_activated()) {
 		_navigator->get_precland()->on_inactivation();
-#if !defined(CONSTRAINED_FLASH)
-		_publish_prec_land_status(false);
-#endif
 	}
 }
 
@@ -1247,20 +1238,3 @@ bool MissionBase::checkMissionDataChanged(mission_s new_mission)
 		(new_mission.mission_update_counter != _mission.mission_update_counter) ||
 		(new_mission.current_seq != _mission.current_seq));
 }
-
-#if !defined(CONSTRAINED_FLASH)
-void MissionBase::_publish_prec_land_status(const bool prec_land_ongoing)
-{
-	prec_land_status_s prec_land_status{};
-
-	if (prec_land_ongoing) {
-		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_ONGOING;
-
-	} else {
-		prec_land_status.state = prec_land_status_s::PREC_LAND_STATE_STOPPED;
-	}
-
-	prec_land_status.nav_state = (int)_navigator->get_precland()->get_prec_land_nav_state();
-	_prec_land_status_pub.publish(prec_land_status);
-}
-#endif
