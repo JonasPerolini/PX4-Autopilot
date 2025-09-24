@@ -16191,9 +16191,10 @@ External modes requiring stick input will still failsafe.
 - `3`: External Mode
 - `4`: Altitude Cruise
 
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; | 0        | 31       |           | 0       |
+
+Reboot | minValue | maxValue | increment | default | unit
+--- | --- | --- | --- | --- | ---
+&nbsp; | 0 | 31 |  | 0 |
 
 ### COM_RC_ARM_HYST (`INT32`) {#COM_RC_ARM_HYST}
 
@@ -24750,22 +24751,12 @@ Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
 &nbsp; | 0 | 1 | 0.01 | 0.1 |
 
-### MAN_DEADZONE (`FLOAT`) {#MAN_DEADZONE}
-
-Deadzone for sticks (only specific use cases).
-
-Range around stick center ignored to prevent
-Does not apply to any precise constant input like
-throttle and attitude or rate piloting.
-
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; | 0        | 1        | 0.01      | 0.1     |
-
 ### MAN_KILL_GEST_T (`FLOAT`) {#MAN_KILL_GEST_T}
 
 Trigger time for kill stick gesture.
 
+The timeout for holding the left stick to the lower left
+and the right stick to the lower right at the same time until the gesture
 kills the actuators one-way.
 A negative value disables the feature.
 
@@ -25619,9 +25610,10 @@ The speed threshold is MPC_HOLD_MAX_XY
 - `1`: Terrain following
 - `2`: Terrain hold
 
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; | 0        | 2        |           | 2       |
+
+Reboot | minValue | maxValue | increment | default | unit
+--- | --- | --- | --- | --- | ---
+&nbsp; | 0 | 2 |  | 2 |
 
 ### MPC_HOLD_MAX_XY (`FLOAT`) {#MPC_HOLD_MAX_XY}
 
@@ -26032,9 +26024,9 @@ trajectory is stopped to wait for the drone.
 This value can be adjusted depending on the tracking
 capabilities of the vehicle.
 
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; | 0.1      | 10       | 1         | 2.      |
+Reboot | minValue | maxValue | increment | default | unit
+--- | --- | --- | --- | --- | ---
+&nbsp; | 0.1 | 10 | 1 | 2. |
 
 ### MPC_XY_P (`FLOAT`) {#MPC_XY_P}
 
@@ -26104,10 +26096,15 @@ Proportional gain for horizontal velocity error.
 
 Defined as corrective acceleration in m/s^2 per m/s velocity error
 
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; | 1.2      | 5        | 0.1       | 1.8     |
+Reboot | minValue | maxValue | increment | default | unit
+--- | --- | --- | --- | --- | ---
+&nbsp; | 1.2 | 5 | 0.1 | 1.8 |
 
+### MPC_Z_P (`FLOAT`) {#MPC_Z_P}
+
+Proportional gain for vertical position error.
+
+Defined as corrective velocity in m/s per m position error
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -26441,7 +26438,11 @@ Pitch rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = MC*PITCHRATE_K * (MC*PITCHRATE_P * error
+output = MC_PITCHRATE_K * (MC_PITCHRATE_P * error
++ MC_PITCHRATE_I * error_integral
++ MC_PITCHRATE_D * error_derivative)
+Set MC_PITCHRATE_P=1 to implement a PID in the ideal form.
+Set MC_PITCHRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -26503,12 +26504,11 @@ Roll rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = MC*ROLLRATE_K * (MC*ROLLRATE_P * error
-
-- MC_ROLLRATE_I \* error_integral
-- MC_ROLLRATE_D \* error_derivative)
-  Set MC_ROLLRATE_P=1 to implement a PID in the ideal form.
-  Set MC_ROLLRATE_K=1 to implement a PID in the parallel form.
+output = MC_ROLLRATE_K * (MC_ROLLRATE_P * error
++ MC_ROLLRATE_I * error_integral
++ MC_ROLLRATE_D * error_derivative)
+Set MC_ROLLRATE_P=1 to implement a PID in the ideal form.
+Set MC_ROLLRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -26570,7 +26570,11 @@ Yaw rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = MC*YAWRATE_K * (MC*YAWRATE_P * error
+output = MC_YAWRATE_K * (MC_YAWRATE_P * error
++ MC_YAWRATE_I * error_integral
++ MC_YAWRATE_D * error_derivative)
+Set MC_YAWRATE_P=1 to implement a PID in the ideal form.
+Set MC_YAWRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -26578,6 +26582,15 @@ Reboot | minValue | maxValue | increment | default | unit
 
 ### MC_YAWRATE_P (`FLOAT`) {#MC_YAWRATE_P}
 
+Yaw rate P gain.
+
+Yaw rate proportional gain, i.e. control output for angular speed error 1 rad/s.
+
+Reboot | minValue | maxValue | increment | default | unit
+--- | --- | --- | --- | --- | ---
+&nbsp; | 0.0 | 0.6 | 0.01 | 0.2 |
+
+### MC_YAW_TQ_CUTOFF (`FLOAT`) {#MC_YAW_TQ_CUTOFF}
 
 Low pass filter cutoff frequency for yaw torque setpoint.
 
@@ -26793,7 +26806,8 @@ Thrust to motor control signal model parameter.
 
 Parameter used to model the nonlinear relationship between
 motor control signal (e.g. PWM) and static thrust.
-The model is: rel*thrust = factor * rel*signal^2 + (1-factor) * rel_signal,
+The model is: rel_thrust = factor * rel_signal^2 + (1-factor) * rel_signal,
+where rel_thrust is the normalized thrust between 0 and 1, and
 rel_signal is the relative motor control signal between 0 and 1.
 
 Reboot | minValue | maxValue | increment | default | unit
@@ -29720,7 +29734,7 @@ Reboot | minValue | maxValue | increment | default | unit
 
 Tuning parameter for the speed reduction based on the course error.
 
-Reduced*speed = RO_MAX_THR_SPEED * (1 - normalized*course_error * RO_SPEED_RED)
+Reduced_speed = RO_MAX_THR_SPEED * (1 - normalized_course_error * RO_SPEED_RED)
 The normalized course error is the angle between the current course and the bearing setpoint
 interpolated from [0, 180] -> [0, 1].
 Higher value -> More speed reduction.
@@ -33057,48 +33071,6 @@ Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
 &nbsp; |  |  |  | 2 |
 
-### SBG_BAUDRATE (`INT32`) {#SBG_BAUDRATE}
-
-sbgECom driver baudrate.
-
-Baudrate used by default for serial communication between PX4
-and SBG Systems INS through sbgECom driver.
-
-| Reboot  | minValue | maxValue | increment | default | unit |
-| ------- | -------- | -------- | --------- | ------- | ---- |
-| &check; | 9600     | 921600   |           | 921600  |
-
-### SBG_CONFIGURE_EN (`INT32`) {#SBG_CONFIGURE_EN}
-
-sbgECom driver INS configuration enable.
-
-Enable SBG Systems INS configuration through sbgECom driver
-on start.
-
-| Reboot | minValue | maxValue | increment | default      | unit |
-| ------ | -------- | -------- | --------- | ------------ | ---- |
-| &nbsp; |          |          |           | Disabled (0) |
-
-### SBG_MODE (`INT32`) {#SBG_MODE}
-
-sbgECom driver mode.
-
-Modes available for sbgECom driver.
-In Sensors Only mode, use external IMU and magnetometer.
-In GNSS mode, use external GNSS in addition to sensors only mode.
-In INS mode, use external Kalman Filter in addition to GNSS mode.
-In INS mode, requires EKF2_EN 0. Keeping both enabled
-can lead to an unexpected behavior and vehicle instability.
-
-**Values:**
-
-- `0`: Sensors Only
-- `1`: GNSS
-- `2`: INS (default)
-
-| Reboot | minValue | maxValue | increment | default | unit |
-| ------ | -------- | -------- | --------- | ------- | ---- |
-| &nbsp; |          |          |           | 2       |
 ### SENS_AFBR_HYSTER (`INT32`) {#SENS_AFBR_HYSTER}
 
 AFBR Rangefinder Short/Long Range Threshold Hysteresis.
@@ -34714,31 +34686,6 @@ Configure on which serial port to run sbgECom.
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
 &check; |  |  |  | 0 |
-
-### SENS_SBG_CFG (`INT32`) {#SENS_SBG_CFG}
-
-Serial Configuration for sbgECom.
-
-Configure on which serial port to run sbgECom.
-
-**Values:**
-
-- `0`: Disabled
-- `6`: UART 6
-- `101`: TELEM 1
-- `102`: TELEM 2
-- `103`: TELEM 3
-- `104`: TELEM/SERIAL 4
-- `201`: GPS 1
-- `202`: GPS 2
-- `203`: GPS 3
-- `300`: Radio Controller
-- `301`: Wifi Port
-- `401`: EXT2
-
-| Reboot  | minValue | maxValue | increment | default | unit |
-| ------- | -------- | -------- | --------- | ------- | ---- |
-| &check; |          |          |           | 0       |
 
 ### SENS_SF0X_CFG (`INT32`) {#SENS_SF0X_CFG}
 
@@ -36708,12 +36655,11 @@ Pitch rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = SC*PITCHRATE_K * (SC*PITCHRATE_P * error
-
-- SC_PITCHRATE_I \* error_integral
-- SC_PITCHRATE_D \* error_derivative)
-  Set SC_PITCHRATE_P=1 to implement a PID in the ideal form.
-  Set SC_PITCHRATE_K=1 to implement a PID in the parallel form.
+output = SC_PITCHRATE_K * (SC_PITCHRATE_P * error
++ SC_PITCHRATE_I * error_integral
++ SC_PITCHRATE_D * error_derivative)
+Set SC_PITCHRATE_P=1 to implement a PID in the ideal form.
+Set SC_PITCHRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -36775,7 +36721,11 @@ Roll rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = SC*ROLLRATE_K * (SC*ROLLRATE_P * error
+output = SC_ROLLRATE_K * (SC_ROLLRATE_P * error
++ SC_ROLLRATE_I * error_integral
++ SC_ROLLRATE_D * error_derivative)
+Set SC_ROLLRATE_P=1 to implement a PID in the ideal form.
+Set SC_ROLLRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -36837,12 +36787,11 @@ Yaw rate controller gain.
 
 Global gain of the controller.
 This gain scales the P, I and D terms of the controller:
-output = SC*YAWRATE_K * (SC*YAWRATE_P * error
-
-- SC_YAWRATE_I \* error_integral
-- SC_YAWRATE_D \* error_derivative)
-  Set SC_YAWRATE_P=1 to implement a PID in the ideal form.
-  Set SC_YAWRATE_K=1 to implement a PID in the parallel form.
+output = SC_YAWRATE_K * (SC_YAWRATE_P * error
++ SC_YAWRATE_I * error_integral
++ SC_YAWRATE_D * error_derivative)
+Set SC_YAWRATE_P=1 to implement a PID in the ideal form.
+Set SC_YAWRATE_K=1 to implement a PID in the parallel form.
 
 Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
@@ -40284,17 +40233,6 @@ Reboot | minValue | maxValue | increment | default | unit
 --- | --- | --- | --- | --- | ---
 &check; | -1 | 9999 |  | -1 |
 
-### UXRCE_DDS_NS_IDX (`INT32`) {#UXRCE_DDS_NS_IDX}
-
-Define an index-based message namespace.
-
-Defines an index-based namespace for DDS messages, e.g, uav_0, uav_1, up to uav_9999
-A value less than zero leaves the namespace empty
-
-| Reboot  | minValue | maxValue | increment | default | unit |
-| ------- | -------- | -------- | --------- | ------- | ---- |
-| &check; | -1       | 9999     |           | -1      |
-
 ### UXRCE_DDS_PRT (`INT32`) {#UXRCE_DDS_PRT}
 
 uXRCE-DDS UDP port.
@@ -41795,8 +41733,8 @@ Set bits in the following positions to enable:
 
 **Bitmask:**
 
-- `0`: VTE for precision landing
-- `1`: VTE for DEBUG, always active
+- `0`: precision landing
+- `1`: DEBUG, always active
 
 
 Reboot | minValue | maxValue | increment | default | unit
