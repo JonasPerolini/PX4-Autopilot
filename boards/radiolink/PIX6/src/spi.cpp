@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2020-2023 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2019-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,54 +31,24 @@
  *
  ****************************************************************************/
 
-/**
- * @file Sensor.hpp
- * Abstract class for sensors
- *
- * @author Mathieu Bresciani <brescianimathieu@gmail.com>
- *
- */
+#include <px4_arch/spi_hw_description.h>
+#include <drivers/drv_sensor.h>
+#include <nuttx/spi/spi.h>
 
-#ifndef EKF_SENSOR_HPP
-#define EKF_SENSOR_HPP
-
-#include <cstdint>
-
-namespace estimator
-{
-namespace sensor
-{
-
-class Sensor
-{
-public:
-	virtual ~Sensor() {};
-
-	/*
-	 * run sanity checks on the current data
-	 * this has to be called immediately after
-	 * setting new data
-	 */
-	virtual void runChecks() {};
-
-	/*
-	 * return true if the sensor is healthy
-	 */
-	virtual bool isHealthy() const = 0;
-
-	/*
-	 * return true if the delayed sample is healthy
-	 * and can be fused in the estimator
-	 */
-	virtual bool isDataHealthy() const = 0;
-
-	/*
-	 * return true if the sensor data rate is
-	 * stable and high enough
-	 */
-	virtual bool isRegularlySendingData() const = 0;
+constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
+	initSPIBus(SPI::Bus::SPI1, {
+		initSPIDevice(DRV_ACC_DEVTYPE_BMI088, SPI::CS{GPIO::PortB, GPIO::Pin12}),
+		initSPIDevice(DRV_GYR_DEVTYPE_BMI088, SPI::CS{GPIO::PortE, GPIO::Pin12}),
+		initSPIDevice(DRV_IMU_DEVTYPE_ICM42688P, SPI::CS{GPIO::PortB, GPIO::Pin4}),
+	}),
+	initSPIBus(SPI::Bus::SPI2, {
+		initSPIDevice(SPIDEV_FLASH(0), SPI::CS{GPIO::PortD, GPIO::Pin10}),
+		initSPIDevice(DRV_OSD_DEVTYPE_ATXXXX, SPI::CS{GPIO::PortA, GPIO::Pin8}),
+	}),
+	initSPIBusExternal(SPI::Bus::SPI4, {
+		initSPIConfigExternal(SPI::CS{GPIO::PortC, GPIO::Pin14}, SPI::DRDY{GPIO::PortD, GPIO::Pin15}),
+		initSPIConfigExternal(SPI::CS{GPIO::PortC, GPIO::Pin15}),
+	}),
 };
 
-} // namespace sensor
-} // namespace estimator
-#endif // !EKF_SENSOR_HPP
+static constexpr bool unused = validateSPIConfig(px4_spi_buses);
