@@ -120,7 +120,8 @@ During route following, PX4 treats the mission as geometry rather than as a full
 VTOL transition handling is still preserved:
 
 - after joining, PX4 can issue a required back-transition before continuing,
-- while following the route, PX4 can still issue front-transition or back-transition commands when the active segment state changes.
+- while following the route, PX4 uses the same segment-end anchor rules as the planner, so reverse traversal still sees the transition items attached to the segment being entered,
+- if type 6 is re-evaluated while the vehicle is already front-transitioning and the new plan flips route direction, PX4 immediately commands a back-transition before continuing.
 
 ### 3.3 Branch-off activation
 
@@ -135,16 +136,21 @@ This is a subtle but important part of the legacy behavior: the vehicle branches
 
 ### 3.4 Landing behavior
 
-For a selected safe point, PX4 injects a final landing item:
+All final SRP landings now run through the same `MissionBase::handleLanding()` pipeline used by the other mission-based RTL modes.
+That preserves the legacy landing subtleties instead of publishing a bare landing item directly.
+
+For a selected safe point, PX4 still injects a synthetic final landing item with:
 
 - `NAV_CMD_LAND` or `NAV_CMD_VTOL_LAND`,
 - `land_precision = 2`,
 - `autocontinue = false`.
 
-For mission-endpoint fallback:
+That landing then inherits the normal mission landing helpers:
 
-- mission land continues toward the mission landing endpoint,
-- mission takeoff fallback lands at the takeoff location using ground-level altitude, not the takeoff waypoint altitude, when the route is flown in reverse.
+- rotary-wing landings insert a move-to-land waypoint first when the vehicle is still laterally displaced,
+- VTOL landings can insert a fixed-wing move-to-land leg, command the VTOL back-transition, and only then descend in MC,
+- mission-land fallback preserves the mission landing item itself, including any mission precision-landing setting,
+- mission-takeoff fallback still lands at the takeoff location using ground-level altitude, not the takeoff waypoint altitude, when the route is flown in reverse.
 
 ## 4. Failure Handling and Current Limitations
 
@@ -165,8 +171,7 @@ The planner and executor now emit `PX4_DEBUG` and `PX4_INFO` logs with the `RTL 
 The current upstream port still leaves these items for future work:
 
 - geofence-aware pruning for vehicle projection and safe-point projection,
-- dedicated reverse-turn execution module,
-- the legacy mission-mode-specific "landed / took off recently" shortcut does not yet have a direct type-6 equivalent in the standalone RTL handler.
+- dedicated reverse-turn execution module.
 
 ## 5. Setup and Configuration
 
@@ -209,7 +214,8 @@ Unit tests in `src/modules/navigator/RtlRoutePlannerTest.cpp` cover:
 - mission-endpoint fallback,
 - direct-to-safe-point behavior,
 - branch-off reuse helper logic,
-- loop-anchor preference.
+- loop-anchor preference,
+- reverse-direction VTOL transition-anchor behavior.
 
 ## Related Topics
 
