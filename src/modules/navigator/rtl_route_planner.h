@@ -233,6 +233,12 @@ public:
 
 	explicit RtlRoutePlanner(const Provider &provider) : _provider(provider) {}
 
+	/**
+	 * @brief Scan the mission geometry for locally minimal projections of one reference point.
+	 *
+	 * The search keeps up to MAX_SEGMENT_CANDIDATES projections inside a shrinking cross-track window and
+	 * can also return along-route bookkeeping for the last flown segment and route end.
+	 */
 	bool findProjectionCandidates(const Position &reference_position, int32_t mission_index,
 				      float home_altitude_amsl,
 				      bool is_flying_reverse, float extra_xtrack_dist,
@@ -242,16 +248,22 @@ public:
 				      uint8_t *loops_remaining,
 				      FailureReason *failure_reason) const;
 
+	/** @brief Project the vehicle onto the mission route and choose the continuity-preserving branch-in candidate. */
 	bool collectVehicleProjection(const Position &vehicle_position, int32_t mission_index,
 				      const Config &config, ProjectionContext &projection_context,
 				      FailureReason *failure_reason) const;
 
+	/** @brief Evaluate all valid safe points and choose the best route-follow return target. */
 	Selection selectSafePoint(const ProjectionContext &projection_context, const Config &config) const;
+	/** @brief Choose the SRP goal, preferring a safe point and falling back to a mission endpoint when needed. */
 	Selection selectBestGoal(const ProjectionContext &projection_context, const Config &config) const;
+	/** @brief Build the full SRP plan: vehicle projection, join context, and selected goal. */
 	bool planRouteToGoal(const Position &vehicle_position, int32_t mission_index,
 			     const Config &config, Plan &plan, FailureReason *failure_reason) const;
+	/** @brief Check whether the vehicle is still close enough to the cached branch-off leg to keep flying straight to the goal. */
 	bool closeToBranchOffSegment(const Position &position, const Selection &selection,
 				     float acceptance_radius) const;
+	/** @brief Determine whether entering the segment containing @p target_index requires a VTOL front- or back-transition. */
 	TransitionAction transitionActionForTargetIndex(int32_t target_index, bool direction_reversed,
 			const Config &config) const;
 
@@ -304,12 +316,20 @@ private:
 	void resetSafePointBatchResults(SafePointBatch &batch) const;
 	bool prepareNextSegment(uint16_t index, Segment &segment, SegmentPositions &segment_positions,
 				float home_altitude_amsl, FailureReason &failure_reason) const;
+	/**
+	 * @brief Evaluate one mission segment for one reference point and keep only locally minimal projections.
+	 *
+	 * This is the core corner-handling routine used by both vehicle and safe-point projection. It clamps the
+	 * orthogonal projection to the segment, classifies near-corner hits, applies the legacy local-minimum rules,
+	 * and maintains the shrinking cross-track candidate window.
+	 */
 	void processCandidateForSegment(const Position &reference_position, const Segment &segment,
 					const SegmentPositions &segment_positions, float segment_length,
 					float total_dist, float extra_xtrack_dist, bool last_segment,
 					bool segment_has_no_length, CandidateSearchState &state,
 					uint32_t &local_min_found, uint32_t &valid_candidate_found,
 					CandidateBuffer &candidate_buffer) const;
+	/** @brief Project a full batch of safe points in one mission scan while preserving loop and along-route bookkeeping. */
 	bool findProjectionCandidatesBatch(int32_t mission_index, float home_altitude_amsl,
 					   bool is_flying_reverse, float extra_xtrack_dist,
 					   const Segment &last_flown_loop_segment,

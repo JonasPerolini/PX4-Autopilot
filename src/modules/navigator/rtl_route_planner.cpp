@@ -614,6 +614,8 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 
 	state.proj_on_end_for_segment = proj_on_end;
 
+	// Only keep locally minimal projections. This avoids emitting both sides of the same shared corner unless
+	// the legacy corner rule explicitly allows it, which keeps the candidate set stable around turns and loops.
 	if (!localMinimumOnSegment(proj_on_start, proj_on_end, state.prev_proj_on_end, segment.is_loop, last_segment)) {
 		return;
 	}

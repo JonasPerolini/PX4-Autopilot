@@ -36,6 +36,7 @@
 #include "rtl_route_planner.h"
 
 #include <lib/geo/geo.h>
+#include <uORB/topics/vtol_vehicle_status.h>
 
 #include <vector>
 
@@ -184,6 +185,15 @@ static mission_item_s makeDoJump(int16_t jump_target_index, uint16_t repeat_coun
 	return item;
 }
 
+/** @brief Build a VTOL transition command for route-state tests. */
+static mission_item_s makeVtolTransitionItem(uint8_t target_state)
+{
+	mission_item_s item{};
+	item.nav_cmd = NAV_CMD_DO_VTOL_TRANSITION;
+	item.params[0] = static_cast<float>(target_state);
+	return item;
+}
+
 /** @brief Build a rally point from a local offset relative to the reference point. */
 static mission_item_s makeSafePointFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt)
@@ -214,6 +224,54 @@ static RtlRoutePlanner::Config defaultConfig()
 	config.home_altitude_amsl = 500.f;
 	config.is_multicopter = true;
 	return config;
+}
+
+TEST(RtlRoutePlannerTest, TransitionActionReverseUsesSegmentEndAnchorForBackTransition)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makeVtolTransitionItem(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makeVtolTransitionItem(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	VectorProvider provider{mission, {}};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Config config = defaultConfig();
+	config.vehicle_is_vtol = true;
+	config.vehicle_is_fixed_wing = true;
+	config.is_multicopter = false;
+
+	EXPECT_EQ(planner.transitionActionForTargetIndex(2, true, config),
+		  RtlRoutePlanner::TransitionAction::BackTransition);
+}
+
+TEST(RtlRoutePlannerTest, TransitionActionReverseUsesSegmentEndAnchorForFrontTransition)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makeVtolTransitionItem(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	VectorProvider provider{mission, {}};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Config config = defaultConfig();
+	config.vehicle_is_vtol = true;
+	config.is_multicopter = true;
+
+	EXPECT_EQ(planner.transitionActionForTargetIndex(1, true, config),
+		  RtlRoutePlanner::TransitionAction::FrontTransition);
 }
 
 TEST(RtlRoutePlannerTest, CollectVehicleProjectionPrefersCurrentMissionSegment)

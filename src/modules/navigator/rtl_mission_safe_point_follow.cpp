@@ -38,6 +38,52 @@
 
 static constexpr int32_t DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE = 5;
 
+namespace
+{
+
+class RouteMissionPlannerProvider : public RtlRoutePlanner::Provider
+{
+public:
+	RouteMissionPlannerProvider(const mission_s &mission, DatamanClient &mission_client) :
+		_mission(mission),
+		_mission_client(mission_client)
+	{
+	}
+
+	int missionCount() const override { return _mission.count; }
+
+	bool loadMissionItem(int index, mission_item_s &mission_item) const override
+	{
+		return index >= 0
+		       && index < _mission.count
+		       && _mission_client.readSync(static_cast<dm_item_t>(_mission.mission_dataman_id), index,
+						   reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item));
+	}
+
+	int safePointCount() const override { return 0; }
+	bool loadSafePointItem(int, mission_item_s &) const override { return false; }
+
+private:
+	const mission_s &_mission;
+	DatamanClient &_mission_client;
+};
+
+RtlRoutePlanner::Config transitionPlannerConfig(const vehicle_status_s &vehicle_status)
+{
+	RtlRoutePlanner::Config config{};
+	config.vehicle_is_vtol = vehicle_status.is_vtol;
+	config.vehicle_is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
+	config.vehicle_in_transition_to_fw = vehicle_status.in_transition_to_fw;
+	return config;
+}
+
+bool isLandingCommand(const mission_item_s &mission_item)
+{
+	return mission_item.nav_cmd == NAV_CMD_LAND || mission_item.nav_cmd == NAV_CMD_VTOL_LAND;
+}
+
+} // namespace
+
 RtlMissionSafePointFollow::RtlMissionSafePointFollow(Navigator *navigator, mission_s mission) :
 	RtlBase(navigator, DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE)
 {
@@ -507,42 +553,6 @@ bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_it
 }
 
 /**
- * @brief Read the VTOL state that defines the segment anchored at the supplied mission index.
- */
-uint8_t RtlMissionSafePointFollow::getVtolStateAtAnchor(uint16_t anchor_index)
-{
-	const dm_item_t mission_dataman_id = static_cast<dm_item_t>(_mission.mission_dataman_id);
-
-	for (int32_t index = static_cast<int32_t>(anchor_index); index >= 0; --index) {
-		mission_item_s mission_item{};
-
-		if (!_dataman_cache.loadWait(mission_dataman_id, index, reinterpret_cast<uint8_t *>(&mission_item),
-					     sizeof(mission_item), MAX_DATAMAN_LOAD_WAIT)) {
-			break;
-		}
-
-		if (mission_item.nav_cmd == NAV_CMD_DO_VTOL_TRANSITION) {
-			const int transition_mode = static_cast<int>(roundf(mission_item.params[0]));
-
-			if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC) {
-				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-			}
-
-			if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
-				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW;
-			}
-		}
-	}
-
-	if (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
-	    || _vehicle_status_sub.get().in_transition_to_fw) {
-		return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW;
-	}
-
-	return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-}
-
-/**
  * @brief Check whether a route target implies a missed back transition on the way to the join point.
  */
 bool RtlMissionSafePointFollow::missedBacktransitionBetweenIndices(int32_t target_index, bool reversed)
@@ -561,69 +571,14 @@ bool RtlMissionSafePointFollow::missedBacktransitionBetweenIndices(int32_t targe
 RtlRoutePlanner::TransitionAction RtlMissionSafePointFollow::transitionActionForTargetIndex(int32_t target_index,
 		bool direction_reversed)
 {
-	(void)direction_reversed;
-
-	if (!_navigator->get_vstatus()->is_vtol || target_index < 0 || target_index >= _mission.count) {
+	if (target_index < 0 || target_index >= _mission.count) {
 		return RtlRoutePlanner::TransitionAction::None;
 	}
 
-	const dm_item_t mission_dataman_id = static_cast<dm_item_t>(_mission.mission_dataman_id);
-	mission_item_s mission_item{};
-
-	if (!_dataman_cache.loadWait(mission_dataman_id, target_index, reinterpret_cast<uint8_t *>(&mission_item),
-				     sizeof(mission_item), MAX_DATAMAN_LOAD_WAIT)) {
-		return RtlRoutePlanner::TransitionAction::None;
-	}
-
-	int32_t anchor_index = target_index;
-	bool anchor_has_position = MissionBlock::item_contains_position(mission_item);
-
-	if (!anchor_has_position) {
-		if (direction_reversed) {
-			if (!loadPreviousRoutePositionItemNoJump(target_index, anchor_index)) {
-				return RtlRoutePlanner::TransitionAction::None;
-			}
-
-			anchor_has_position = true;
-
-		} else {
-			anchor_has_position = false;
-
-			for (int32_t index = target_index + 1; index < _mission.count; ++index) {
-				anchor_index = index;
-
-				if (!_dataman_cache.loadWait(mission_dataman_id, index, reinterpret_cast<uint8_t *>(&mission_item),
-							     sizeof(mission_item), MAX_DATAMAN_LOAD_WAIT)) {
-					return RtlRoutePlanner::TransitionAction::None;
-				}
-
-				if (MissionBlock::item_contains_position(mission_item)) {
-					anchor_has_position = true;
-					break;
-				}
-			}
-		}
-	}
-
-	if (!anchor_has_position) {
-		return RtlRoutePlanner::TransitionAction::None;
-	}
-
-	const uint8_t target_seg_state = getVtolStateAtAnchor(static_cast<uint16_t>(anchor_index));
-
-	if (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
-	    && !_vehicle_status_sub.get().in_transition_to_fw
-	    && target_seg_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
-		return RtlRoutePlanner::TransitionAction::FrontTransition;
-	}
-
-	if ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
-	     || _vehicle_status_sub.get().in_transition_to_fw)
-	    && target_seg_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC) {
-		return RtlRoutePlanner::TransitionAction::BackTransition;
-	}
-
-	return RtlRoutePlanner::TransitionAction::None;
+	RouteMissionPlannerProvider planner_provider(_mission, _dataman_client);
+	RtlRoutePlanner planner(planner_provider);
+	return planner.transitionActionForTargetIndex(target_index, direction_reversed,
+			transitionPlannerConfig(_vehicle_status_sub.get()));
 }
 
 /**
@@ -648,6 +603,57 @@ void RtlMissionSafePointFollow::publishRouteItems(position_setpoint_triplet_s *p
 
 	issue_command(current_mission_item);
 	_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+	reset_mission_item_reached();
+
+	if (_mission_type == MissionType::MISSION_TYPE_MISSION) {
+		set_mission_result();
+	}
+
+	publish_navigator_mission_item();
+	_navigator->set_position_setpoint_triplet_updated();
+}
+
+/**
+ * @brief Publish the landing stage through MissionBase::handleLanding() so SRP keeps VTOL and precision-land semantics.
+ */
+void RtlMissionSafePointFollow::publishLandingItems(position_setpoint_triplet_s *pos_sp_triplet,
+		const position_setpoint_s &current_setpoint_copy, const mission_item_s &landing_mission_item)
+{
+	static constexpr size_t max_num_next_items{1U};
+	mission_item_s next_mission_items[max_num_next_items] {};
+	size_t num_found_items = 0U;
+	WorkItemType new_work_item_type{WorkItemType::WORK_ITEM_TYPE_DEFAULT};
+
+	_mission_item = landing_mission_item;
+	handleLanding(new_work_item_type, next_mission_items, num_found_items);
+
+	if (num_found_items > 0U) {
+		mission_item_to_position_setpoint(next_mission_items[0], &pos_sp_triplet->next);
+
+	} else {
+		_navigator->reset_position_setpoint(pos_sp_triplet->next);
+	}
+
+	mission_item_to_position_setpoint(_mission_item, &pos_sp_triplet->current);
+
+	if ((_work_item_type != WorkItemType::WORK_ITEM_TYPE_MOVE_TO_LAND)
+	    && !position_setpoint_equal(&pos_sp_triplet->current, &current_setpoint_copy)) {
+		pos_sp_triplet->previous = current_setpoint_copy;
+	}
+
+	const bool fw_on_goal_landing = _vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
+					&& _stage == Stage::LandAtGoal
+					&& _mission_item.nav_cmd == NAV_CMD_WAYPOINT;
+	const bool mc_landing_after_transition = _vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+			&& _vehicle_status_sub.get().is_vtol
+			&& new_work_item_type == WorkItemType::WORK_ITEM_TYPE_MOVE_TO_LAND;
+
+	if (fw_on_goal_landing || mc_landing_after_transition) {
+		pos_sp_triplet->current.alt_acceptance_radius = FLT_MAX;
+	}
+
+	issue_command(_mission_item);
+	_work_item_type = new_work_item_type;
 	reset_mission_item_reached();
 
 	if (_mission_type == MissionType::MISSION_TYPE_MISSION) {
@@ -720,13 +726,36 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 				break;
 			}
 
+			const bool selected_endpoint_active = _plan.selection.goal_type != RtlRoutePlanner::GoalType::SafePoint
+							      && _mission.current_seq == _plan.selection.path.first_item_index;
+			const bool current_item_is_mission_landing = _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand
+					&& isLandingCommand(_mission_item);
+
+			if (selected_endpoint_active
+			    && (current_item_is_mission_landing
+				|| _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff)) {
+				_stage = Stage::LandAtGoal;
+				PX4_INFO("RTL SRP endpoint target active, handing over to landing stage");
+
+				mission_item_s landing_item{};
+
+				if (current_item_is_mission_landing) {
+					landing_item = _mission_item;
+
+				} else {
+					setLandMissionItem(landing_item);
+				}
+
+				publishLandingItems(pos_sp_triplet, current_setpoint_copy, landing_item);
+				break;
+			}
+
 			const auto transition_action = transitionActionForTargetIndex(_mission.current_seq,
 						       _plan.selection.path.direction_reversed);
 
 			mission_item_s current_route_item = _mission_item;
 			const bool current_item_is_endpoint = _plan.selection.goal_type != RtlRoutePlanner::GoalType::SafePoint
-							      && (_mission_item.nav_cmd == NAV_CMD_LAND
-									      || _mission_item.nav_cmd == NAV_CMD_VTOL_LAND);
+							      && isLandingCommand(_mission_item);
 
 			if (!current_item_is_endpoint) {
 				normalizeRouteMissionItem(current_route_item);
@@ -800,8 +829,15 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 
 	case Stage::LandAtGoal: {
 			mission_item_s land_item{};
-			setLandMissionItem(land_item);
-			publishRouteItems(pos_sp_triplet, current_setpoint_copy, land_item, nullptr);
+
+			if (_plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand && isLandingCommand(_mission_item)) {
+				land_item = _mission_item;
+
+			} else {
+				setLandMissionItem(land_item);
+			}
+
+			publishLandingItems(pos_sp_triplet, current_setpoint_copy, land_item);
 			break;
 		}
 

@@ -525,6 +525,9 @@ void RTL::setRtlTypeAndDestination()
 		}
 
 	} else if (_param_rtl_type.get() == 6) {
+		const bool current_route_direction_reversed = cached_route_safe_point_plan.valid()
+				? cached_route_safe_point_plan.selection.path.direction_reversed : false;
+
 		if (_navigator->get_mission_result()->valid) {
 			RtlRoutePlannerProvider planner_provider(_mission_sub.get(), _dataman_cache_landItem.client(),
 					_dataman_client_safepoint);
@@ -610,6 +613,18 @@ void RTL::setRtlTypeAndDestination()
 		}
 
 		if (_route_safe_point_plan.valid()) {
+			const bool direction_will_change = current_route_direction_reversed
+							   != _route_safe_point_plan.selection.path.direction_reversed;
+
+			if (isActive() && direction_will_change && _vehicle_status_sub.get().in_transition_to_fw) {
+				vehicle_command_s cmd{};
+				cmd.command = vehicle_command_s::VEHICLE_CMD_DO_VTOL_TRANSITION;
+				cmd.param1 = vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
+				cmd.param2 = 0.f;
+				_navigator->publish_vehicle_command(cmd);
+				PX4_INFO("RTL type 6 direction changed during FT, applying immediate BT");
+			}
+
 			new_rtl_type = RtlType::RTL_MISSION_SAFE_POINT_FOLLOW;
 			_last_route_safe_point_loop_segment = _route_safe_point_plan.projection_context.projection.segment;
 			destination_type = _route_safe_point_plan.selection.safe_point_found
