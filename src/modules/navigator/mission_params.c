@@ -162,3 +162,45 @@ PARAM_DEFINE_INT32(MIS_LND_ABRT_ALT, 30);
  * @group Mission
  */
 PARAM_DEFINE_FLOAT(MIS_COMMAND_TOUT, 0.f);
+
+/**
+ * Extra search distance for multicopter mission-route projections
+ *
+ * Additional cross-track distance used when projecting the vehicle position onto the
+ * uploaded mission for route-aware safe-point RTL.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Mission
+ */
+PARAM_DEFINE_FLOAT(MIS_MC_SEG_DIST, 30.f);
+
+/**
+ * Extra search distance for fixed-wing mission-route projections
+ *
+ * Additional cross-track distance used when projecting the vehicle position onto the
+ * uploaded mission for route-aware safe-point RTL.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Mission
+ */
+PARAM_DEFINE_FLOAT(MIS_FW_SEG_DIST, 150.f);
+
+/**
+ * Extra search distance for safe-point mission-route projections
+ *
+ * Additional cross-track distance used when projecting safe points onto the uploaded
+ * mission for route-aware safe-point RTL.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Mission
+ */
+PARAM_DEFINE_FLOAT(MIS_RP_SEG_DIST, 30.f);

@@ -114,6 +114,7 @@ PARAM_DEFINE_FLOAT(RTL_MIN_DIST, 10.0f);
  * @value 3 Return via direct path to closest destination: home, start of mission landing pattern or safe point. If the destination is a mission landing pattern, follow the pattern to land.
  * @value 4 Return to the planned mission landing, or to home via the reverse mission path, whichever is closer by counting waypoints. Do not consider rally points.
  * @value 5 Return directly to safe landing point (do not consider mission landing and Home)
+ * @value 6 Return to a safe point by rejoining the uploaded mission route, following it to the best branch-off, then leaving the route to land at the safe point.
  * @group Return Mode
  */
 PARAM_DEFINE_INT32(RTL_TYPE, 0);
