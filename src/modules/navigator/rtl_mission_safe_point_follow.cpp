@@ -87,11 +87,6 @@ void RtlMissionSafePointFollow::on_inactivation()
 	MissionBase::on_inactivation();
 }
 
-void RtlMissionSafePointFollow::on_inactive()
-{
-	MissionBase::on_inactive();
-}
-
 /**
  * @brief Initialize the SRP stage machine from the cached route plan.
  */
@@ -927,11 +922,34 @@ rtl_time_estimate_s RtlMissionSafePointFollow::calc_rtl_time_estimate()
 
 	// Fall through: include remaining route distance.
 	case Stage::FollowRoute: {
-			// Along-route distance from the planner.  This was computed at plan time from
-			// the vehicle projection to the branch-off projection, so it covers the full
-			// follow-route leg.  It may overestimate slightly if we have already advanced
-			// past the plan's first_item_index, but it is the best available figure.
-			remaining_dist += _plan.selection.path.dist;
+			// During FollowRoute, approximate the remaining distance as the straight-line
+			// distance from the vehicle to the current waypoint target plus the plan's
+			// route distance reduced by the distance already covered.  For JoinRoute and
+			// TransitionAfterJoin stages we fall through and use the full plan distance
+			// since we haven't started following the route yet.
+			if (_stage == Stage::FollowRoute) {
+				const auto *global_pos = _navigator->get_global_position();
+
+				if (global_pos != nullptr && PX4_ISFINITE(global_pos->lat) && PX4_ISFINITE(global_pos->lon)
+				    && _plan.projection_context.projection.projection.valid()) {
+					// Distance from vehicle's original projection to now, approximated as
+					// straight-line from current position to the plan's join projection.
+					const float dist_already_covered = get_distance_to_next_waypoint(
+							_plan.projection_context.projection.projection.lat,
+							_plan.projection_context.projection.projection.lon,
+							global_pos->lat, global_pos->lon);
+
+					// Use max(plan_dist - covered, 0) to avoid going negative if the vehicle
+					// has drifted past the branch-off.
+					remaining_dist += fmaxf(_plan.selection.path.dist - dist_already_covered, 0.f);
+
+				} else {
+					remaining_dist += _plan.selection.path.dist;
+				}
+
+			} else {
+				remaining_dist += _plan.selection.path.dist;
+			}
 
 			// Add the straight-line distance from the branch-off projection to the goal.
 			if (_plan.selection.branch_off_projection.valid() && _plan.selection.goal_position.valid()) {

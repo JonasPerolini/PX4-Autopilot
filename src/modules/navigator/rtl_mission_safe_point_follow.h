@@ -43,7 +43,6 @@ public:
 	~RtlMissionSafePointFollow() = default;
 
 	void on_inactivation() override;
-	void on_inactive() override;
 	void on_activation() override;
 
 	bool isLanding() override { return _stage == Stage::LandAtGoal; }

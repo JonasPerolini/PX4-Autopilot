@@ -63,57 +63,6 @@ static constexpr int RTL_TYPE_ROUTE_SAFE_POINT = 6;
 namespace
 {
 
-const char *plannerFailureString(RtlRoutePlanner::FailureReason failure_reason)
-{
-	switch (failure_reason) {
-	case RtlRoutePlanner::FailureReason::None:
-		return "None";
-
-	case RtlRoutePlanner::FailureReason::NoValidGlobalPos:
-		return "NoValidGlobalPos";
-
-	case RtlRoutePlanner::FailureReason::NoValidWaypoints:
-		return "NoValidWaypoints";
-
-	case RtlRoutePlanner::FailureReason::NoSegmentsFound:
-		return "NoSegmentsFound";
-
-	case RtlRoutePlanner::FailureReason::InternalError:
-		return "InternalError";
-
-	case RtlRoutePlanner::FailureReason::NoLocalMinFound:
-		return "NoLocalMinFound";
-
-	case RtlRoutePlanner::FailureReason::PositionItemInvalid:
-		return "PositionItemInvalid";
-
-	case RtlRoutePlanner::FailureReason::NoValidCandidateFound:
-		return "NoValidCandidateFound";
-
-	case RtlRoutePlanner::FailureReason::Unknown:
-	default:
-		return "Unknown";
-	}
-}
-
-const char *goalTypeString(RtlRoutePlanner::GoalType goal_type)
-{
-	switch (goal_type) {
-	case RtlRoutePlanner::GoalType::SafePoint:
-		return "safe_point";
-
-	case RtlRoutePlanner::GoalType::MissionLand:
-		return "mission_land";
-
-	case RtlRoutePlanner::GoalType::MissionTakeoff:
-		return "mission_takeoff";
-
-	case RtlRoutePlanner::GoalType::None:
-	default:
-		return "none";
-	}
-}
-
 class RtlRoutePlannerProvider : public RtlRoutePlanner::Provider
 {
 public:
@@ -384,7 +333,7 @@ void RTL::on_activation()
 	case RtlType::RTL_MISSION_SAFE_POINT_FOLLOW:
 		if (_rtl_type == RtlType::RTL_MISSION_SAFE_POINT_FOLLOW && _route_safe_point_plan.valid()) {
 			PX4_INFO("RTL type 6 active: goal=%s safe_point=%d target=%d rev=%u direct=%u branch_off[%d,%d]",
-				 goalTypeString(_route_safe_point_plan.selection.goal_type),
+				 RtlRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
 				 static_cast<int>(_route_safe_point_plan.selection.safe_point_index),
 				 static_cast<int>(_route_safe_point_plan.selection.path.first_item_index),
 				 static_cast<unsigned>(_route_safe_point_plan.selection.path.direction_reversed),
@@ -554,8 +503,8 @@ void RTL::setRtlTypeAndDestination()
 
 			RtlRoutePlanner::Config config{};
 			config.vehicle_projection_search_dist = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
-								? _param_mis_mc_seg_dist.get() : _param_mis_fw_seg_dist.get();
-			config.safe_point_projection_search_dist = _param_mis_rp_seg_dist.get();
+								? _param_rtl_mc_seg_dist.get() : _param_rtl_fw_seg_dist.get();
+			config.safe_point_projection_search_dist = _param_rtl_rp_seg_dist.get();
 			config.acceptance_radius = _navigator->get_acceptance_radius();
 			config.direct_acceptance_radius = _navigator->get_default_acceptance_radius();
 			config.home_altitude_amsl = _home_pos_sub.get().alt;
@@ -617,14 +566,14 @@ void RTL::setRtlTypeAndDestination()
 									    || _route_safe_point_plan.selection.direct_to_safe_point;
 
 					PX4_DEBUG("RTL type 6 planned goal=%s target=%d rev=%u direct=%u bt=%u",
-						  goalTypeString(_route_safe_point_plan.selection.goal_type),
+						  RtlRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
 						  static_cast<int>(_route_safe_point_plan.selection.path.first_item_index),
 						  static_cast<unsigned>(_route_safe_point_plan.selection.path.direction_reversed),
 						  static_cast<unsigned>(_should_go_straight_to_safe_point),
 						  static_cast<unsigned>(_route_safe_point_plan.join_context.vtol_back_transition_required));
 
 				} else {
-					PX4_WARN("RTL type 6 planning failed: %s", plannerFailureString(failure_reason));
+					PX4_WARN("RTL type 6 planning failed: %s", RtlRoutePlanner::failureReasonString(failure_reason));
 				}
 			}
 		}
@@ -669,7 +618,7 @@ void RTL::setRtlTypeAndDestination()
 		}
 
 	} else {
-		// check the closest allowed destination.
+		// RTL_TYPE 0, 1, 3, 5: use closest safe point / home / mission landing via direct path.
 		findRtlDestination(destination_type, destination, safe_point_index);
 
 		if (destination_type == DestinationType::DESTINATION_TYPE_MISSION_LAND) {
@@ -721,6 +670,10 @@ void RTL::setRtlTypeAndDestination()
 		initRtlMissionType(new_rtl_type, rtl_alt);
 	}
 
+	// setRoutePlan is called unconditionally (even when the type hasn't changed) so that
+	// a replanned route is pushed to the executor.  The executor's stage machine in
+	// RtlMissionSafePointFollow::setRoutePlan handles mid-flight plan updates correctly
+	// because it only caches the plan and branch-off index without resetting the stage.
 	if (new_rtl_type == RtlType::RTL_MISSION_SAFE_POINT_FOLLOW && _rtl_mission_type_handle) {
 		_rtl_mission_type_handle->setRoutePlan(_route_safe_point_plan);
 	}

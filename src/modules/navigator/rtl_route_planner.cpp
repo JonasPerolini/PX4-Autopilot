@@ -36,67 +36,61 @@
 #include <lib/geo/geo.h>
 #include <mathlib/mathlib.h>
 
-#define PRINTF_LOG
 #include <px4_platform_common/log.h>
 #include <uORB/topics/vtol_vehicle_status.h>
 
 using namespace math;
 
-namespace
-{
-
-const char *failureReasonString(RtlRoutePlanner::FailureReason failure_reason)
+const char *RtlRoutePlanner::failureReasonString(FailureReason failure_reason)
 {
 	switch (failure_reason) {
-	case RtlRoutePlanner::FailureReason::None:
+	case FailureReason::None:
 		return "None";
 
-	case RtlRoutePlanner::FailureReason::NoValidGlobalPos:
+	case FailureReason::NoValidGlobalPos:
 		return "NoValidGlobalPos";
 
-	case RtlRoutePlanner::FailureReason::NoValidWaypoints:
+	case FailureReason::NoValidWaypoints:
 		return "NoValidWaypoints";
 
-	case RtlRoutePlanner::FailureReason::NoSegmentsFound:
+	case FailureReason::NoSegmentsFound:
 		return "NoSegmentsFound";
 
-	case RtlRoutePlanner::FailureReason::InternalError:
+	case FailureReason::InternalError:
 		return "InternalError";
 
-	case RtlRoutePlanner::FailureReason::NoLocalMinFound:
+	case FailureReason::NoLocalMinFound:
 		return "NoLocalMinFound";
 
-	case RtlRoutePlanner::FailureReason::PositionItemInvalid:
+	case FailureReason::PositionItemInvalid:
 		return "PositionItemInvalid";
 
-	case RtlRoutePlanner::FailureReason::NoValidCandidateFound:
+	case FailureReason::NoValidCandidateFound:
 		return "NoValidCandidateFound";
 
-	case RtlRoutePlanner::FailureReason::Unknown:
+	case FailureReason::Unknown:
 	default:
 		return "Unknown";
 	}
 }
 
-const char *goalTypeString(RtlRoutePlanner::GoalType goal_type)
+const char *RtlRoutePlanner::goalTypeString(GoalType goal_type)
 {
 	switch (goal_type) {
-	case RtlRoutePlanner::GoalType::SafePoint:
+	case GoalType::SafePoint:
 		return "safe_point";
 
-	case RtlRoutePlanner::GoalType::MissionLand:
+	case GoalType::MissionLand:
 		return "mission_land";
 
-	case RtlRoutePlanner::GoalType::MissionTakeoff:
+	case GoalType::MissionTakeoff:
 		return "mission_takeoff";
 
-	case RtlRoutePlanner::GoalType::None:
+	case GoalType::None:
 	default:
 		return "none";
 	}
 }
-
-} // namespace
 
 /** @brief Validate a global route-planning position. */
 bool RtlRoutePlanner::Position::valid() const
@@ -494,17 +488,16 @@ void RtlRoutePlanner::pruneProjectionCandidates(CandidateBuffer &candidate_buffe
 	}
 
 	const uint8_t buffer_size = min(candidate_buffer.count, MAX_SEGMENT_CANDIDATES);
+	uint8_t index = buffer_size;
 
-	for (uint8_t index = buffer_size - 1U; index < buffer_size; --index) {
+	do {
+		--index;
+
 		if (candidate_buffer.candidates[index].dist.xtrack <= xtrack_limit) {
 			candidate_buffer.count = index + 1U;
 			return;
 		}
-
-		if (index == 0) {
-			break;
-		}
-	}
+	} while (index > 0);
 
 	candidate_buffer.count = 0;
 }

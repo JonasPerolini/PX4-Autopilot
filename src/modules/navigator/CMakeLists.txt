@@ -40,7 +40,7 @@ px4_add_library(navigator_rtl_route_planner
 
 target_link_libraries(navigator_rtl_route_planner PUBLIC geo)
 
-px4_add_unit_gtest(SRC RtlRoutePlannerTest.cpp LINKLIBS navigator_rtl_route_planner geo)
+px4_add_functional_gtest(SRC RtlRoutePlannerTest.cpp LINKLIBS navigator_rtl_route_planner)
 
 set(NAVIGATOR_SOURCES
 	navigator_main.cpp

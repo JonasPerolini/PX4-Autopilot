@@ -668,3 +668,175 @@ TEST(RtlRoutePlannerTest, CollectVehicleProjectionPrefersStoredLoopAnchor)
 	EXPECT_EQ(projection_context.projection.segment.start.idx, 2);
 	EXPECT_EQ(projection_context.projection.segment.end.idx, 0);
 }
+
+TEST(RtlRoutePlannerTest, PlanRouteToGoalFailsWithSingleWaypoint)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+	};
+
+	VectorProvider provider{mission, {}};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Plan plan{};
+	RtlRoutePlanner::FailureReason failure_reason{RtlRoutePlanner::FailureReason::Unknown};
+
+	const RtlRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+
+	EXPECT_FALSE(planner.planRouteToGoal(vehicle_position, 0, defaultConfig(), plan, &failure_reason));
+	EXPECT_EQ(failure_reason, RtlRoutePlanner::FailureReason::NoValidWaypoints);
+}
+
+TEST(RtlRoutePlannerTest, SelectSafePointReturnsEmptyWhenAllSafePointsInvalid)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+	};
+
+	// Create safe points with unsupported frame (will be rejected by extractSafePointPosition).
+	std::vector<mission_item_s> invalid_safe_points;
+
+	for (int i = 0; i < 3; ++i) {
+		mission_item_s item{};
+		item.nav_cmd = NAV_CMD_RALLY_POINT;
+		item.lat = kBaseLat;
+		item.lon = kBaseLon;
+		item.altitude = kAlt;
+		item.frame = 15; // Invalid frame (not a recognized NAV_FRAME_*)
+		invalid_safe_points.push_back(item);
+	}
+
+	VectorProvider provider{mission, invalid_safe_points};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::ProjectionContext projection_context{};
+	const RtlRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, defaultConfig(), projection_context, nullptr));
+
+	const RtlRoutePlanner::Selection selection = planner.selectSafePoint(projection_context, defaultConfig());
+	EXPECT_FALSE(selection.found);
+}
+
+TEST(RtlRoutePlannerTest, PlanRouteToGoalFallsBackWhenAllSafePointsInvalid)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> invalid_safe_points;
+	mission_item_s item{};
+	item.nav_cmd = NAV_CMD_RALLY_POINT;
+	item.lat = kBaseLat;
+	item.lon = kBaseLon;
+	item.altitude = kAlt;
+	item.frame = 15; // Invalid frame (not a recognized NAV_FRAME_*)
+	invalid_safe_points.push_back(item);
+
+	VectorProvider provider{mission, invalid_safe_points};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Plan plan{};
+	RtlRoutePlanner::FailureReason failure_reason{RtlRoutePlanner::FailureReason::Unknown};
+
+	const RtlRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt);
+
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_position, 1, defaultConfig(), plan, &failure_reason));
+	ASSERT_TRUE(plan.valid());
+
+	// Should fall back to mission endpoint since no valid safe points exist.
+	EXPECT_FALSE(plan.selection.safe_point_found);
+	EXPECT_TRUE(plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand
+		    || plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff);
+}
+
+TEST(RtlRoutePlannerTest, SelectSafePointHandlesLoopWithRemainingIterations)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 3, 1),  // 2 loops remaining
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f, 100.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 50.f, 50.f, kAlt),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Plan plan{};
+	RtlRoutePlanner::FailureReason failure_reason{RtlRoutePlanner::FailureReason::Unknown};
+
+	const RtlRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt);
+
+	// planRouteToGoal forces loops_remaining=0 for SRP (line 1759 in rtl_route_planner.cpp),
+	// so the planner should still find a valid plan even with pending loop iterations.
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_position, 1, defaultConfig(), plan, &failure_reason));
+	ASSERT_TRUE(plan.valid());
+	EXPECT_TRUE(plan.selection.found);
+}
+
+TEST(RtlRoutePlannerTest, TransitionActionNoneForNonVtol)
+{
+	static constexpr double kBaseLat = 47.397742;
+	static constexpr double kBaseLon = 8.545594;
+	static constexpr float kAlt = 500.f;
+
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makeVtolTransitionItem(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+	};
+
+	VectorProvider provider{mission, {}};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Config config = defaultConfig();
+	// Non-VTOL vehicle should always return None.
+	config.vehicle_is_vtol = false;
+	config.vehicle_is_fixed_wing = false;
+	config.is_multicopter = true;
+
+	EXPECT_EQ(planner.transitionActionForTargetIndex(2, false, config),
+		  RtlRoutePlanner::TransitionAction::None);
+	EXPECT_EQ(planner.transitionActionForTargetIndex(2, true, config),
+		  RtlRoutePlanner::TransitionAction::None);
+}
+
+TEST(RtlRoutePlannerTest, PlanRouteToGoalFailsWithEmptyMission)
+{
+	std::vector<mission_item_s> mission{};
+	std::vector<mission_item_s> safe_points{};
+
+	VectorProvider provider{mission, safe_points};
+	RtlRoutePlanner planner{provider};
+	RtlRoutePlanner::Plan plan{};
+	RtlRoutePlanner::FailureReason failure_reason{RtlRoutePlanner::FailureReason::Unknown};
+
+	const RtlRoutePlanner::Position vehicle_position{47.397742, 8.545594, 500.f};
+
+	EXPECT_FALSE(planner.planRouteToGoal(vehicle_position, 0, defaultConfig(), plan, &failure_reason));
+	EXPECT_EQ(failure_reason, RtlRoutePlanner::FailureReason::NoValidWaypoints);
+}

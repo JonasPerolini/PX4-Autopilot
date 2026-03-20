@@ -48,7 +48,13 @@ public:
 	static constexpr double kNullIslandThresholdDeg{1e-7};
 	static constexpr double kCornerLatLonTolDeg{1e-5};
 	static constexpr uint8_t MAX_SEGMENT_CANDIDATES{3};
+	/**
+	 * Maximum safe points evaluated per planning cycle.
+	 * NOTE: RtlStatus.msg uses uint8_t for safe_point_index, so this must stay <= 255.
+	 * If raised above 255, the constrain() in rtl.cpp::setRtlTypeAndDestination will silently truncate.
+	 */
 	static constexpr uint8_t MAX_SAFE_POINT_BATCH{64};
+	/** Fixed-wing U-turn penalty: approximate diameter of a standard FW holding pattern (~2 km turn radius with safety margin). */
 	static constexpr float kUturnPenaltyM{4000.f};
 
 	enum class GoalType : uint8_t {
@@ -220,6 +226,13 @@ public:
 		Unknown
 	};
 
+	/**
+	 * @brief Abstraction for mission and safe-point data access.
+	 *
+	 * Production code uses the RtlRoutePlannerProvider in rtl.cpp (reads from dataman).
+	 * Unit tests supply a VectorProvider backed by std::vector, which keeps the planner
+	 * testable without any dataman or uORB dependencies.
+	 */
 	class Provider
 	{
 	public:
@@ -273,6 +286,8 @@ public:
 					   Position &position);
 	static bool extractSafePointPosition(const mission_item_s &safe_point_item, float home_altitude_amsl,
 					     Position &position);
+	static const char *failureReasonString(FailureReason failure_reason);
+	static const char *goalTypeString(GoalType goal_type);
 
 private:
 	struct CandidateSearchState {

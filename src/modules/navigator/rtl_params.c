@@ -202,3 +202,45 @@ PARAM_DEFINE_INT32(RTL_TIME_MARGIN, 100);
  * @group Return To Land
  */
 PARAM_DEFINE_INT32(RTL_APPR_FORCE, 0);
+
+/**
+ * Extra cross-track search distance for multicopter route projections
+ *
+ * Additional cross-track distance used when projecting the vehicle position onto the
+ * uploaded mission for route-aware safe-point RTL (RTL_TYPE = 6).
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Return Mode
+ */
+PARAM_DEFINE_FLOAT(RTL_MC_SEG_DIST, 30.f);
+
+/**
+ * Extra cross-track search distance for fixed-wing route projections
+ *
+ * Additional cross-track distance used when projecting the vehicle position onto the
+ * uploaded mission for route-aware safe-point RTL (RTL_TYPE = 6).
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Return Mode
+ */
+PARAM_DEFINE_FLOAT(RTL_FW_SEG_DIST, 150.f);
+
+/**
+ * Extra cross-track search distance for safe-point route projections
+ *
+ * Additional cross-track distance used when projecting safe points onto the uploaded
+ * mission for route-aware safe-point RTL (RTL_TYPE = 6).
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Return Mode
+ */
+PARAM_DEFINE_FLOAT(RTL_RP_SEG_DIST, 30.f);

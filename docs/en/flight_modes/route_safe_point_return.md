@@ -37,7 +37,7 @@ The vehicle is projected onto the full route geometry, not just the nearest wayp
 - `DO_JUMP` items create loop edges by connecting the jump source to the jump target's next valid position item.
 - Zero-length interior segments are ignored.
 - Up to three local-minimum candidates are kept, sorted by cross-track distance.
-- The search window shrinks to `min_xtrack + MIS_MC_SEG_DIST` or `min_xtrack + MIS_FW_SEG_DIST` as soon as a closer candidate is found.
+- The search window shrinks to `min_xtrack + RTL_MC_SEG_DIST` or `min_xtrack + RTL_FW_SEG_DIST` as soon as a closer candidate is found.
 
 Candidate selection then favors route continuity:
 
@@ -171,7 +171,10 @@ The planner and executor now emit `PX4_DEBUG` and `PX4_INFO` logs with the `RTL 
 
 ### 4.2 Time estimation
 
-Route Safe Point Return provides a basic remaining-flight-time estimate by dividing the remaining along-route distance (plus the branch-off-to-goal straight-line distance) by the active cruising speed.
+Route Safe Point Return provides a remaining-flight-time estimate by dividing the remaining route distance by the active cruising speed.
+During the FollowRoute stage, the estimate subtracts the straight-line distance the vehicle has already covered from its original projection point, so the reported time decreases as the vehicle progresses along the route.
+During JoinRoute and TransitionAfterJoin stages, the full plan distance is used since the vehicle has not yet started following the route.
+The branch-off-to-goal straight-line distance is always added.
 This approximation ignores altitude changes, wind, and VTOL transitions, but gives the operator a useful indication of remaining flight time.
 The estimate is published via `rtl_time_estimate` during the JoinRoute, FollowRoute, and BranchOff stages; it is not published during the final landing descent.
 
@@ -192,9 +195,9 @@ Route Safe Point Return requires:
 
 Useful tuning parameters:
 
-- [MIS_MC_SEG_DIST](../advanced_config/parameter_reference.md#MIS_MC_SEG_DIST): extra cross-track search window for multicopter or VTOL-in-MC vehicle projection.
-- [MIS_FW_SEG_DIST](../advanced_config/parameter_reference.md#MIS_FW_SEG_DIST): extra cross-track search window for fixed-wing or VTOL-in-FW vehicle projection.
-- [MIS_RP_SEG_DIST](../advanced_config/parameter_reference.md#MIS_RP_SEG_DIST): extra cross-track search window for safe-point projection.
+- [RTL_MC_SEG_DIST](../advanced_config/parameter_reference.md#RTL_MC_SEG_DIST): extra cross-track search window for multicopter or VTOL-in-MC vehicle projection.
+- [RTL_FW_SEG_DIST](../advanced_config/parameter_reference.md#RTL_FW_SEG_DIST): extra cross-track search window for fixed-wing or VTOL-in-FW vehicle projection.
+- [RTL_RP_SEG_DIST](../advanced_config/parameter_reference.md#RTL_RP_SEG_DIST): extra cross-track search window for safe-point projection.
 - [NAV_ACC_RAD](../advanced_config/parameter_reference.md#NAV_ACC_RAD): affects join acceptance, branch-off acceptance, and the direct-to-safe-point shortcut.
 
 Larger search windows expose more candidate segments but also admit more distant branch-off options.
@@ -227,7 +230,12 @@ Unit tests in `src/modules/navigator/RtlRoutePlannerTest.cpp` cover:
 - direct-to-safe-point behavior,
 - branch-off reuse helper logic,
 - loop-anchor preference,
-- reverse-direction VTOL transition-anchor behavior.
+- reverse-direction VTOL transition-anchor behavior,
+- single-waypoint mission rejection (< 2 items),
+- empty mission rejection,
+- all-invalid safe-point fallback to mission endpoint,
+- loop with remaining iterations,
+- non-VTOL transition action returns None.
 
 ## Related Topics
 
