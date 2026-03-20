@@ -54,6 +54,12 @@ using matrix::wrap_pi;
 static constexpr float MAX_DIST_FROM_HOME_FOR_LAND_APPROACHES{10.0f}; // [m] We don't consider safe points valid if the distance from the current home to the safe point is smaller than this distance
 static constexpr float MIN_DIST_THRESHOLD = 2.f;
 
+// Named constants for RTL_TYPE parameter values (must match @value tags in rtl_params.c).
+static constexpr int RTL_TYPE_MISSION_FAST = 2;
+static constexpr int RTL_TYPE_MISSION_FAST_OR_REVERSE = 4;
+static constexpr int RTL_TYPE_SAFE_POINT_DIRECT = 5;
+static constexpr int RTL_TYPE_ROUTE_SAFE_POINT = 6;
+
 namespace
 {
 
@@ -217,6 +223,10 @@ void RTL::updateDatamanCache()
 				_opaque_id = _stats.opaque_id;
 				_safe_points_updated = false;
 
+				// Safe-point set changed: drop any cached route plan that may reference
+				// now-stale safe-point positions or indices.
+				resetRouteSafePointCache();
+
 				_dataman_cache_safepoint.invalidate();
 
 				if (_dataman_cache_safepoint.size() != _stats.num_items) {
@@ -259,7 +269,7 @@ void RTL::updateDatamanCache()
 
 	if (_mission_id != _mission_sub.get().mission_id) {
 		_mission_id = _mission_sub.get().mission_id;
-		_last_route_safe_point_loop_segment = {};
+		resetRouteSafePointCache();
 		const dm_item_t dm_item = static_cast<dm_item_t>(_mission_sub.get().mission_dataman_id);
 		_dataman_cache_landItem.invalidate();
 
@@ -269,6 +279,13 @@ void RTL::updateDatamanCache()
 	}
 
 	_dataman_cache_landItem.update();
+}
+
+void RTL::resetRouteSafePointCache()
+{
+	_route_safe_point_plan = {};
+	_last_route_safe_point_loop_segment = {};
+	_should_go_straight_to_safe_point = false;
 }
 
 void RTL::on_inactive()
@@ -500,7 +517,7 @@ void RTL::setRtlTypeAndDestination()
 	landing_loiter.lon = destination.lon;
 	landing_loiter.height_m = NAN;
 
-	if (_param_rtl_type.get() == 2) {
+	if (_param_rtl_type.get() == RTL_TYPE_MISSION_FAST) {
 		if (hasMissionLandStart()) {
 			new_rtl_type = RtlType::RTL_MISSION_FAST;
 
@@ -512,7 +529,7 @@ void RTL::setRtlTypeAndDestination()
 			new_rtl_type = RtlType::RTL_DIRECT;
 		}
 
-	} else if (_param_rtl_type.get() == 4) {
+	} else if (_param_rtl_type.get() == RTL_TYPE_MISSION_FAST_OR_REVERSE) {
 		if (hasMissionLandStart() && reverseIsFurther()) {
 			new_rtl_type = RtlType::RTL_MISSION_FAST;
 
@@ -524,7 +541,7 @@ void RTL::setRtlTypeAndDestination()
 			new_rtl_type = RtlType::RTL_DIRECT;
 		}
 
-	} else if (_param_rtl_type.get() == 6) {
+	} else if (_param_rtl_type.get() == RTL_TYPE_ROUTE_SAFE_POINT) {
 		const bool current_route_direction_reversed = cached_route_safe_point_plan.valid()
 				? cached_route_safe_point_plan.selection.path.direction_reversed : false;
 
@@ -747,7 +764,7 @@ PositionYawSetpoint RTL::findClosestSafePoint(float min_dist, uint8_t &safe_poin
 			const bool far_from_home = get_distance_to_next_waypoint(_home_pos_sub.get().lat, _home_pos_sub.get().lon,
 						   mission_safe_point.lat, mission_safe_point.lon) > MAX_DIST_FROM_HOME_FOR_LAND_APPROACHES;
 
-			if (mission_safe_point.nav_cmd == NAV_CMD_RALLY_POINT && (far_from_home || (_param_rtl_type.get() == 5))) {
+			if (mission_safe_point.nav_cmd == NAV_CMD_RALLY_POINT && (far_from_home || (_param_rtl_type.get() == RTL_TYPE_SAFE_POINT_DIRECT))) {
 				const float dist{get_distance_to_next_waypoint(_global_pos_sub.get().lat, _global_pos_sub.get().lon, mission_safe_point.lat, mission_safe_point.lon)};
 
 				PositionYawSetpoint safepoint_position;
@@ -832,7 +849,7 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 		destination = safe_point;
 		destination_type = DestinationType::DESTINATION_TYPE_SAFE_POINT;
 
-	} else if (_param_rtl_type.get() == 5) {
+	} else if (_param_rtl_type.get() == RTL_TYPE_SAFE_POINT_DIRECT) {
 		// Safe points only but no valid safe point, fallback to last position with valid data link
 		for (auto &telemetry_status :  _telemetry_status_subs) {
 			telemetry_status_s telemetry;

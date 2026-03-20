@@ -77,6 +77,8 @@ Two shortcuts are inherited from the legacy SRP behavior:
 
 The cached branch-off reuse is what prevents repeated mode toggles from pulling the vehicle back to the route after it has already branched off.
 
+The cached plan is invalidated whenever the mission or safe-point data changes (new mission upload or safe-point set update), so the planner never reuses stale geometry.
+
 ### 2.4 Mission-endpoint fallback
 
 If no safe point can be selected, Route Safe Point Return stays mission-aware.
@@ -112,10 +114,11 @@ It is not simply "because the join landed on a fixed-wing segment".
 
 During route following, PX4 treats the mission as geometry rather than as a full mission replay:
 
-- nominal direction walks forward through position items,
-- reverse direction walks backward through position items,
-- non-position mission commands are skipped instead of being replayed,
-- `DO_JUMP` is not re-executed as mission control flow.
+- nominal direction walks forward through position items, skipping `DO_JUMP` entries instead of following them as control flow,
+- reverse direction walks backward through position items, also skipping `DO_JUMP` entries,
+- loiter items (`NAV_CMD_LOITER_UNLIMITED`, `NAV_CMD_LOITER_TIME_LIMIT`, `NAV_CMD_LOITER_TO_ALT`) are converted to plain waypoints with `autocontinue = true` and zero hold time so the vehicle keeps moving,
+- `NAV_CMD_DELAY` items are clamped to zero hold time,
+- other non-position mission commands are skipped instead of being replayed.
 
 VTOL transition handling is still preserved:
 
@@ -166,7 +169,13 @@ Route Safe Point Return is evaluated defensively:
 
 The planner and executor now emit `PX4_DEBUG` and `PX4_INFO` logs with the `RTL SRP` prefix so projection choice, safe-point scoring, loop handling, branch-off reuse, and stage transitions can be traced during testing.
 
-### 4.2 Current limitations
+### 4.2 Time estimation
+
+Route Safe Point Return provides a basic remaining-flight-time estimate by dividing the remaining along-route distance (plus the branch-off-to-goal straight-line distance) by the active cruising speed.
+This approximation ignores altitude changes, wind, and VTOL transitions, but gives the operator a useful indication of remaining flight time.
+The estimate is published via `rtl_time_estimate` during the JoinRoute, FollowRoute, and BranchOff stages; it is not published during the final landing descent.
+
+### 4.3 Current limitations
 
 The current upstream port still leaves these items for future work:
 
@@ -195,9 +204,12 @@ Smaller windows keep the behavior closer to the nominal route.
 
 The core type-6 logic lives in:
 
-- `src/modules/navigator/rtl_route_planner.cpp`: pure route projection, safe-point scoring, loop handling, and join/fallback planning.
-- `src/modules/navigator/rtl.cpp`: plan construction, cached branch-off reuse, and mode selection.
-- `src/modules/navigator/rtl_mission_safe_point_follow.cpp`: staged route execution, branch-off injection, and landing injection.
+- `src/modules/navigator/rtl_route_planner.cpp`: pure route projection, safe-point scoring, loop handling, and join/fallback planning.  The planner is kept pure and testable via a `Provider` abstraction; the production Provider lives in `rtl.cpp` and the unit tests supply a `VectorProvider`.
+- `src/modules/navigator/rtl.cpp`: plan construction, cached branch-off reuse, cache invalidation on mission/safe-point changes, and mode selection.  RTL type constants (`RTL_TYPE_ROUTE_SAFE_POINT`, etc.) are named here to avoid magic numbers.
+- `src/modules/navigator/rtl_mission_safe_point_follow.cpp`: staged route execution, branch-off injection, landing injection, and VTOL transition handling.  VTOL transition queries use direct dataman access (consistent with other RTL modes) rather than a separate Provider instance.
+
+The `SafePointBatch` struct (~25 KB for 64 items with candidate buffers) is allocated statically to avoid stack overflow on constrained targets.
+This matches the legacy `PositionBatch` pattern and is not thread-safe.
 
 The main planner structures are:
 

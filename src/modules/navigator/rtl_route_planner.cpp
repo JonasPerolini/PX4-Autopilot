@@ -565,6 +565,31 @@ bool RtlRoutePlanner::isIndexInProjectionSegment(const Segment &projection_segme
 }
 
 /** @brief Evaluate one reference position against one mission segment and keep locally optimal projections. */
+/**
+ * @brief Evaluate one mission segment for one reference point and keep only locally minimal projections.
+ *
+ * Algorithm outline:
+ *   1. If the segment is zero-length, the projection is the endpoint itself (xtrack = direct distance).
+ *   2. Otherwise, compute the orthogonal projection of the reference point onto the segment:
+ *      - Vector A→B: segment start to segment end (local NED frame).
+ *      - Vector A→P: segment start to reference point.
+ *      - Projection parameter: t = (A→P · A→B) / |A→B|².
+ *      - Clamp t to [0, 1] to stay on the segment.
+ *   3. Corner detection (5 cm tolerance):
+ *      - proj_on_start: t * segment_length < 5 cm.
+ *      - proj_on_end: (1 − t) * segment_length < 5 cm.
+ *   4. Local minimum filter (localMinimumOnSegment):
+ *      - Jump/loop segments: only non-corner projections are local minima.
+ *      - Last segment: proj_on_end is always accepted.
+ *      - Normal segments: accept non-corner projections, or accept a corner when consecutive
+ *        segments share the same vertex (proj_on_start AND previous segment's proj_on_end).
+ *   5. Reject if xtrack is non-finite or exceeds the current shrinking search window.
+ *   6. Reconstruct the projection in global coordinates (lat/lon via local NED vector addition,
+ *      altitude via linear interpolation).
+ *   7. Validate the candidate (finite distances, valid indices).
+ *   8. If xtrack < current min_xtrack, tighten the search window and prune stale candidates.
+ *   9. Insert the candidate into the buffer sorted by xtrack (up to MAX_SEGMENT_CANDIDATES = 3).
+ */
 void RtlRoutePlanner::processCandidateForSegment(const Position &reference_position, const Segment &segment,
 		const SegmentPositions &segment_positions, float segment_length, float total_dist,
 		float extra_xtrack_dist, bool last_segment, bool segment_has_no_length,
@@ -579,18 +604,19 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 	bool proj_on_start = false;
 	bool proj_on_end = false;
 
+	// --- Step 1: Degenerate (zero-length) segment handling ---
 	if (segment_has_no_length) {
-		// Degenerate segments collapse to a single corner, so the projection is the endpoint itself.
+		// If the segment is a point, the projection is the point itself.
 		xtrack = get_distance_to_next_waypoint(reference_position.lat, reference_position.lon,
 						       segment_positions.end.lat, segment_positions.end.lon);
 		proj_on_start = true;
 		proj_on_end = true;
 
 	} else {
-		matrix::Vector2f segment_vector;
-		matrix::Vector2f reference_vector;
+		// --- Step 2: Orthogonal projection onto the segment ---
+		matrix::Vector2f segment_vector;   // Vector A→B (segment start to end)
+		matrix::Vector2f reference_vector; // Vector A→P (segment start to reference point)
 
-		// Project the reference point onto the local NED segment, then clamp to the segment bounds.
 		get_vector_to_next_waypoint(segment_positions.start.lat, segment_positions.start.lon,
 					    segment_positions.end.lat, segment_positions.end.lon,
 					    &segment_vector(0), &segment_vector(1));
@@ -598,14 +624,17 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 					    reference_position.lat, reference_position.lon,
 					    &reference_vector(0), &reference_vector(1));
 
+		// t = (A→P · A→B) / |A→B|²  — unclamped scalar projection parameter.
 		const float path_len_sq = segment_vector.norm_squared();
 		const float t = (path_len_sq > FLT_EPSILON) ? (reference_vector.dot(segment_vector) / path_len_sq) : 0.f;
-		static constexpr float kCornerToleranceM = 0.05f;
 
-		// Treat points slightly outside the segment or very near a corner as corner projections.
+		// --- Step 3: Corner detection ---
+		// If t is negative, (t * len) is negative which is < tol, so this check handles both cases.
+		static constexpr float kCornerToleranceM = 0.05f;
 		proj_on_start = (t * segment_length) < kCornerToleranceM;
 		proj_on_end = ((1.f - t) * segment_length) < kCornerToleranceM;
 
+		// Final clamped projection.
 		t_clamped = constrain(t, 0.f, 1.f);
 		projection_vector = segment_vector * t_clamped;
 		xtrack = static_cast<matrix::Vector2f>(reference_vector - projection_vector).norm();
@@ -614,20 +643,23 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 
 	state.proj_on_end_for_segment = proj_on_end;
 
-	// Only keep locally minimal projections. This avoids emitting both sides of the same shared corner unless
-	// the legacy corner rule explicitly allows it, which keeps the candidate set stable around turns and loops.
+	// --- Step 4: Local minimum filter ---
+	// Only keep locally minimal projections.  This avoids emitting both sides of the same shared
+	// corner unless the legacy corner rule explicitly allows it, which keeps the candidate set
+	// stable around turns and loops.
 	if (!localMinimumOnSegment(proj_on_start, proj_on_end, state.prev_proj_on_end, segment.is_loop, last_segment)) {
 		return;
 	}
 
 	local_min_found++;
 
-	// Reject non-finite projections and anything outside the current shrinking xtrack window
-	// before reconstructing the global projection point.
+	// --- Step 5: Reject non-finite or out-of-window projections ---
+	// We abort here before doing LatLon reconstruction (which is more expensive).
 	if (!PX4_ISFINITE(xtrack) || xtrack < 0.f || xtrack >= state.xtrack_limit) {
 		return;
 	}
 
+	// --- Step 6: Construct the candidate with global coordinates ---
 	SegmentCandidate candidate{};
 	candidate.segment = segment;
 	candidate.segment_positions = segment_positions;
@@ -640,6 +672,7 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 		candidate.projection = segment_positions.end;
 
 	} else {
+		// Reconstruct the projected lat/lon from the local NED offset vector.
 		double lat_res;
 		double lon_res;
 		add_vector_to_global_position(segment_positions.start.lat, segment_positions.start.lon,
@@ -647,16 +680,19 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 					      &lat_res, &lon_res);
 		candidate.projection.lat = lat_res;
 		candidate.projection.lon = lon_res;
+		// Interpolate altitude linearly along the segment.
 		candidate.projection.alt = segment_positions.start.alt
 					   + t_clamped * (segment_positions.end.alt - segment_positions.start.alt);
 	}
 
+	// --- Step 7: Validate the candidate ---
 	if (!validateCandidate(candidate)) {
 		return;
 	}
 
 	valid_candidate_found++;
 
+	// --- Steps 8–9: Tighten search window and insert sorted ---
 	if (xtrack < state.min_xtrack) {
 		// A new closest projection tightens the search window, so prune stale candidates first.
 		state.min_xtrack = xtrack;
@@ -885,7 +921,10 @@ bool RtlRoutePlanner::findProjectionCandidates(const Position &reference_positio
 		return false;
 	}
 
-	SafePointBatch batch{};
+	// Static to keep the ~25 KB SafePointBatch off the stack.  Only one item
+	// is used here, but the struct is fixed-size.  Warning: not thread-safe.
+	static SafePointBatch batch{};
+	batch = {};
 	batch.count = 1;
 	batch.items[0].position = reference_position;
 
@@ -928,7 +967,10 @@ bool RtlRoutePlanner::collectVehicleProjection(const Position &vehicle_position,
 			static_cast<int>(requested_mission_index), static_cast<int>(mission_index));
 	}
 
-	SafePointBatch batch{};
+	// Static to keep the ~25 KB SafePointBatch off the stack.  Only one item
+	// is used here, but the struct is fixed-size.  Warning: not thread-safe.
+	static SafePointBatch batch{};
+	batch = {};
 	batch.count = 1;
 	batch.items[0].position = vehicle_position;
 	SegmentDistanceAlong dist_along_to_last_flown_segment{};
@@ -1200,7 +1242,24 @@ bool RtlRoutePlanner::uTurnRequired(const ProjectionContext &projection_context,
 	return local_velocity.dot(desired_course) < 0.f;
 }
 
-/** @brief Compute the shortest route distance from the vehicle projection to a mission goal. */
+/**
+ * @brief Compute the shortest along-route path from the vehicle projection to a goal projection.
+ *
+ * Case 1 — Normal path (vehicle NOT on a DO_JUMP loop, or goal on the same loop):
+ *   - Direction decision: reverse if goal_dist_along < vehicle projection dist_along.
+ *   - Distance = |goal_dist_along − vehicle_dist_along|.
+ *   - FW/VTOL-FW U-turn penalty: +4000 m when reversing would require an immediate turn-around.
+ *   - First item selection: when direction is unchanged and the mission index lies within the
+ *     projected segment, choose the segment start (unless already at end) so the join target
+ *     stays on the current leg.  When direction changes, choose start if reverse, end otherwise.
+ *
+ * Case 2 — Vehicle on a DO_JUMP loop, goal outside the loop:
+ *   - Path A (complete loop): remaining loop distance + distance from loop end to goal.
+ *   - Path B (reverse loop):  already-travelled loop distance + distance from loop start to goal.
+ *   - If loops_remaining > 0: force Path A (must complete the loop iteration).
+ *   - Otherwise: choose the cheaper path.
+ *   - Each path independently evaluates its FW U-turn penalty.
+ */
 RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_end_idx, float goal_dist_along,
 		const ProjectionContext &projection_context, const Config &config,
 		PathDirectionMode direction_mode) const
@@ -1214,6 +1273,7 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 		return raw_distance + (u_turn_required ? kUturnPenaltyM : 0.f);
 	};
 
+	// --- Case 1: Normal path (no active loop, or goal on the same loop) ---
 	if (!on_jump_segment_and_goal_elsewhere) {
 		const bool will_fly_reverse = mustFlyReverse(goal_dist_along, projection_context.projection.dist.along,
 					      direction_mode);
@@ -1223,6 +1283,7 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 		path.u_turn_required = uTurnRequired(projection_context, config, will_fly_reverse);
 		path.dist = calculate_cost(abs_distance_projection_to_goal, path.u_turn_required);
 
+		// Choose which segment endpoint becomes the first target for route following.
 		bool choose_item_start = false;
 		const bool direction_change = (projection_context.is_flying_reverse != will_fly_reverse);
 
@@ -1230,9 +1291,12 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 		    && isIndexInProjectionSegment(projection_context.projection.segment,
 						  projection_context.mission_index,
 						  projection_context.is_flying_reverse)) {
+			// No direction change, still on the same segment: prefer segment start unless
+			// already past it, so the mission stays anchored on the current leg.
 			choose_item_start = projection_context.mission_index < projection_context.projection.segment.end.idx;
 
 		} else {
+			// Direction change or off-segment: choose start when reversing, end when nominal.
 			choose_item_start = will_fly_reverse;
 		}
 
@@ -1248,6 +1312,9 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 		}
 
 	} else {
+		// --- Case 2: Vehicle on a DO_JUMP loop, goal outside the loop ---
+
+		// Path A: complete the remaining loop distance then continue to the goal.
 		const float dist_jump_remaining = fabsf(projection_context.projection.dist.segment_length
 							- projection_context.projection.dist.on_segment);
 		const float path_a_raw_cost = dist_jump_remaining
@@ -1257,6 +1324,7 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 		const bool path_a_u_turn_required = uTurnRequired(projection_context, config, is_rev_from_loop_end);
 		const float path_a_cost = calculate_cost(path_a_raw_cost, path_a_u_turn_required);
 
+		// If loops remain, we must complete the current iteration — force Path A.
 		if (projection_context.loop_ctx.segment.loops_remaining > 0) {
 			path.first_item_index = projection_context.loop_ctx.segment.end.idx;
 			path.first_item_cmd = projection_context.loop_ctx.segment.end.nav_cmd;
@@ -1266,6 +1334,7 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 			first_item_location = projection_context.projection.segment_positions.end;
 
 		} else {
+			// Path B: backtrack the already-travelled loop distance then continue to the goal.
 			const float dist_jump_travelled = projection_context.projection.dist.on_segment;
 			const float path_b_raw_cost = dist_jump_travelled
 						      + fabsf(goal_dist_along - projection_context.loop_ctx.along.start);
@@ -1274,6 +1343,7 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 			const bool path_b_u_turn_required = uTurnRequired(projection_context, config, is_rev_from_loop_start);
 			const float path_b_cost = calculate_cost(path_b_raw_cost, path_b_u_turn_required);
 
+			// Select the cheaper of Path A (complete loop) vs Path B (reverse loop).
 			if (path_a_cost < path_b_cost) {
 				path.first_item_index = projection_context.loop_ctx.segment.end.idx;
 				path.first_item_cmd = projection_context.loop_ctx.segment.end.nav_cmd;
@@ -1333,7 +1403,22 @@ bool RtlRoutePlanner::directToSafePoint(const Position &safe_point_position, con
 	return PX4_ISFINITE(dist) && dist < config.direct_acceptance_radius;
 }
 
-/** @brief Scan every safe point, project it onto the mission, and pick the best route-follow goal. */
+/**
+ * @brief Scan every safe point, project it onto the mission, and pick the best route-follow goal.
+ *
+ * Algorithm:
+ *   1. Load all safe points from dataman into a batch (up to MAX_SAFE_POINT_BATCH = 64).
+ *   2. Project every safe point onto the mission geometry in a single batched scan, producing up
+ *      to 3 local-minimum candidates per safe point.
+ *   3. For each safe point, evaluate every valid candidate:
+ *      - Loop candidates are only considered when the vehicle itself is on a loop edge.
+ *      - findShortestPath() computes the along-route cost from vehicle projection to candidate.
+ *      - Track the candidate with the lowest path cost.
+ *   4. First priority: if the vehicle is a multicopter already within direct acceptance radius of
+ *      any safe point, select it immediately and stop (direct-to-safe-point shortcut).
+ *   5. Second priority: select the safe point with the shortest valid path cost.
+ *   6. Record the winning safe point's position, branch-off segment, and projection.
+ */
 RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionContext &projection_context,
 		const Config &config) const
 {
@@ -1343,7 +1428,11 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionCont
 		return selection;
 	}
 
-	SafePointBatch batch{};
+	// SafePointBatch is ~25 KB (64 items with candidate buffers); allocate it
+	// statically to avoid stack overflow on constrained targets.
+	// Warning: not thread-safe — matches the legacy PositionBatch pattern.
+	static SafePointBatch batch{};
+	batch = {};
 
 	if (!loadSafePointBatch(config.home_altitude_amsl, batch)) {
 		PX4_DEBUG("RTL SRP search: no safe points available");
