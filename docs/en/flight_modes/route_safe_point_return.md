@@ -52,7 +52,7 @@ The algorithm for selecting a branch-in point is executed in three phases:
 
 **Phase 1 - Identifying valid candidates:**
 
-The system first identifies up to three potential projection points on the flight route by calculating perpendicular lines from the vehicle's current position to all route segments. A projection point is only considered a valid candidate if the distance from the UA to the segment (crosstrack distance) must not exceed the distance to the closest available segment plus an allowed margin. This margin is determined by the vehicle's current flight mode:
+The system first identifies up to three potential projection points on the flight route by calculating perpendicular lines from the vehicle's current position to all route segments. A projection point is only considered a valid candidate if the crosstrack distance from the vehicle to the segment does not not exceed the crosstrack distance to the closest available segment plus an allowed margin. This margin is determined by the vehicle's current flight mode:
  - Multicopter: [RTL_MC_SEG_DIST](../advanced_config/parameter_reference.md#RTL_MC_SEG_DIST) by default, 30 m.
  - Fixed-wing: [RTL_FW_SEG_DIST](../advanced_config/parameter_reference.md#RTL_FW_SEG_DIST) by default, 150 m.
 
@@ -78,7 +78,7 @@ The algorithm for selecting a safe point projection (potential branch-off) is ex
 
 **Phase 1 - Identifying valid candidates:**
 
-The process for identifying valid projection candidates is identical to Phase 1 of the vehicle projection algorithm: a projection point is only considered a valid candidate if the distance from the UA to the segment (crosstrack distance) must not exceed the distance to the closest available segment plus an allowed margin. This margin is determined by [RTL_RP_SEG_DIST](../advanced_config/parameter_reference.md#RTL_RP_SEG_DIST).
+The process for identifying valid projection candidates is identical to Phase 1 of the vehicle projection algorithm: a projection point is only considered a valid candidate if the crosstrack distance from the vehicle to the segment does not exceed the crosstrack distance to the closest available segment plus an allowed margin. This margin is determined by [RTL_RP_SEG_DIST](../advanced_config/parameter_reference.md#RTL_RP_SEG_DIST).
 
 **Phase 2 - Selecting the best projection point:**
 

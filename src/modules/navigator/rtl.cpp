@@ -332,14 +332,14 @@ void RTL::on_activation()
 	case RtlType::RTL_MISSION_FAST_REVERSE: // Fall through
 	case RtlType::RTL_MISSION_SAFE_POINT_FOLLOW:
 		if (_rtl_type == RtlType::RTL_MISSION_SAFE_POINT_FOLLOW && _route_safe_point_plan.valid()) {
-			PX4_INFO("RTL type 6 active: goal=%s safe_point=%d target=%d rev=%u direct=%u branch_off[%d,%d]",
-				 RtlRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
-				 static_cast<int>(_route_safe_point_plan.selection.safe_point_index),
-				 static_cast<int>(_route_safe_point_plan.selection.path.first_item_index),
-				 static_cast<unsigned>(_route_safe_point_plan.selection.path.direction_reversed),
-				 static_cast<unsigned>(_should_go_straight_to_safe_point),
-				 static_cast<int>(_route_safe_point_plan.selection.branch_off_segment.start.idx),
-				 static_cast<int>(_route_safe_point_plan.selection.branch_off_segment.end.idx));
+			PX4_DEBUG("RTL type 6 active: goal=%s safe_point=%d target=%d rev=%u direct=%u branch_off[%d,%d]",
+				  RtlRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
+				  static_cast<int>(_route_safe_point_plan.selection.safe_point_index),
+				  static_cast<int>(_route_safe_point_plan.selection.path.first_item_index),
+				  static_cast<unsigned>(_route_safe_point_plan.selection.path.direction_reversed),
+				  static_cast<unsigned>(_should_go_straight_to_safe_point),
+				  static_cast<int>(_route_safe_point_plan.selection.branch_off_segment.start.idx),
+				  static_cast<int>(_route_safe_point_plan.selection.branch_off_segment.end.idx));
 		}
 
 		if (_rtl_mission_type_handle) {
@@ -588,7 +588,7 @@ void RTL::setRtlTypeAndDestination()
 				cmd.param1 = vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
 				cmd.param2 = 0.f;
 				_navigator->publish_vehicle_command(cmd);
-				PX4_INFO("RTL type 6 direction changed during FT, applying immediate BT");
+				PX4_DEBUG("RTL type 6 direction changed during FT, applying immediate BT");
 			}
 
 			new_rtl_type = RtlType::RTL_MISSION_SAFE_POINT_FOLLOW;
@@ -671,7 +671,7 @@ void RTL::setRtlTypeAndDestination()
 	}
 
 	// setRoutePlan is called unconditionally (even when the type hasn't changed) so that
-	// a replanned route is pushed to the executor.  The executor's stage machine in
+	// a replanned route is pushed to the executor.  The executor's state machine in
 	// RtlMissionSafePointFollow::setRoutePlan handles mid-flight plan updates correctly
 	// because it only caches the plan and branch-off index without resetting the stage.
 	if (new_rtl_type == RtlType::RTL_MISSION_SAFE_POINT_FOLLOW && _rtl_mission_type_handle) {

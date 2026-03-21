@@ -32,7 +32,7 @@
  ****************************************************************************/
 
 /**
- * @file RtlSafePointTest.cpp
+ * @file test_RTL_safe_point.cpp
  *
  * Unit tests for RtlRoutePlanner safe-point (rally point) evaluation and
  * selection during route-following RTL. Covers:
@@ -47,10 +47,12 @@
  * - Batched scanning efficiency: verifies single mission scan for multiple safe points
  * - Loop handling: DO_JUMP projection, reverse jump choice, remaining iterations
  * - Velocity edge cases: zero velocity and orthogonal velocity for FW u-turn logic
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
-#include "RtlRoutePlannerTestHelpers.h"
-#include "RtlRoutePlannerTestData.h"
+#include "test_RTL_helpers.h"
+#include "test_RTL_data.h"
 
 // ============================================================================
 // Common constants for offset-based tests

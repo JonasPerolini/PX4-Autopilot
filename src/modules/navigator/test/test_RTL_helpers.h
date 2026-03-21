@@ -32,12 +32,14 @@
  ****************************************************************************/
 
 /**
- * @file RtlRoutePlannerTestHelpers.h
+ * @file test_RTL_helpers.h
  *
  * Shared helpers for RtlRoutePlanner unit tests.
  * Provides in-memory Provider implementations, mission item factory
  * functions, default configs, tolerance constants, and verification
  * helpers.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
 #pragma once

@@ -31,6 +31,16 @@
  *
  ****************************************************************************/
 
+/**
+ * @file rtl_mission_safe_point_follow.cpp
+ *
+ * RTL executor that follows the uploaded mission route toward a safe-point
+ * branch-off, then leaves the route to land at the chosen safe point.
+ * Falls back to the closest mission endpoint when no safe point is available.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
+ */
+
 #include "rtl_mission_safe_point_follow.h"
 #include "navigator.h"
 
@@ -140,20 +150,20 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 	case Stage::JoinRoute:
 		if (_plan.join_context.vtol_back_transition_required) {
 			_stage = Stage::TransitionAfterJoin;
-			PX4_INFO("RTL SRP join route reached, applying BT before following route");
+			PX4_DEBUG("RTL SRP join route reached, applying BT before following route");
 
 		} else if (joinProjectionNearBranchOff()) {
 			_should_go_straight_to_goal = true;
 			_stage = Stage::LandAtGoal;
-			PX4_INFO("RTL SRP join projection is already near branch-off, flying straight to goal");
+			PX4_DEBUG("RTL SRP join projection is already near branch-off, flying straight to goal");
 
 		} else if (currentTargetIsBranchOff()) {
 			_stage = Stage::BranchOff;
-			PX4_INFO("RTL SRP current target is branch-off, leaving route for goal");
+			PX4_DEBUG("RTL SRP current target is branch-off, leaving route for goal");
 
 		} else {
 			_stage = Stage::FollowRoute;
-			PX4_INFO("RTL SRP join route reached, following route");
+			PX4_DEBUG("RTL SRP join route reached, following route");
 		}
 
 		return true;
@@ -162,15 +172,15 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 		if (joinProjectionNearBranchOff()) {
 			_should_go_straight_to_goal = true;
 			_stage = Stage::LandAtGoal;
-			PX4_INFO("RTL SRP join transition complete, flying straight to goal");
+			PX4_DEBUG("RTL SRP join transition complete, flying straight to goal");
 
 		} else if (currentTargetIsBranchOff()) {
 			_stage = Stage::BranchOff;
-			PX4_INFO("RTL SRP current target is branch-off after join transition, leaving route for goal");
+			PX4_DEBUG("RTL SRP current target is branch-off after join transition, leaving route for goal");
 
 		} else {
 			_stage = Stage::FollowRoute;
-			PX4_INFO("RTL SRP join transition complete, following route");
+			PX4_DEBUG("RTL SRP join transition complete, following route");
 		}
 
 		return true;
@@ -180,14 +190,14 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 			// Legacy SRP branches off as soon as that branch-off index becomes the active target.
 			// It does not wait until the original mission waypoint at that index has been flown.
 			_stage = Stage::BranchOff;
-			PX4_INFO("RTL SRP current target is branch-off, leaving route for goal");
+			PX4_DEBUG("RTL SRP current target is branch-off, leaving route for goal");
 			return true;
 		}
 
 		if (_plan.selection.goal_type != RtlRoutePlanner::GoalType::SafePoint
 		    && _mission.current_seq == _plan.selection.path.first_item_index) {
 			_stage = Stage::LandAtGoal;
-			PX4_INFO("RTL SRP fallback endpoint reached, landing at goal");
+			PX4_DEBUG("RTL SRP fallback endpoint reached, landing at goal");
 			return true;
 		}
 
@@ -199,7 +209,7 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 
 				if (currentTargetIsBranchOff()) {
 					_stage = Stage::BranchOff;
-					PX4_INFO("RTL SRP next reverse target is branch-off, leaving route for goal");
+					PX4_DEBUG("RTL SRP next reverse target is branch-off, leaving route for goal");
 				}
 
 				return true;
@@ -223,7 +233,7 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 
 				if (currentTargetIsBranchOff()) {
 					_stage = Stage::BranchOff;
-					PX4_INFO("RTL SRP next nominal target is branch-off, leaving route for goal");
+					PX4_DEBUG("RTL SRP next nominal target is branch-off, leaving route for goal");
 				}
 
 				return true;
@@ -235,7 +245,7 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 	case Stage::BranchOff:
 		_stage = Stage::LandAtGoal;
 		_should_go_straight_to_goal = true;
-		PX4_INFO("RTL SRP branch-off waypoint reached, landing at goal");
+		PX4_DEBUG("RTL SRP branch-off waypoint reached, landing at goal");
 		return true;
 
 	case Stage::LandAtGoal:
@@ -740,7 +750,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 				|| _vehicle_status_sub.get().in_transition_to_fw)
 			    && !_land_detected_sub.get().landed) {
 
-				PX4_INFO("RTL SRP join route applying BT");
+				PX4_DEBUG("RTL SRP join route applying BT");
 				set_vtol_transition_item(&_mission_item, vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
 				_mission_item.yaw = NAN;
 				pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
@@ -781,7 +791,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 			    && (current_item_is_mission_landing
 				|| _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff)) {
 				_stage = Stage::LandAtGoal;
-				PX4_INFO("RTL SRP endpoint target active, handing over to landing stage");
+				PX4_DEBUG("RTL SRP endpoint target active, handing over to landing stage");
 
 				mission_item_s landing_item{};
 

@@ -31,6 +31,16 @@
  *
  ****************************************************************************/
 
+/**
+ * @file rtl_mission_safe_point_follow.h
+ *
+ * RTL executor that follows the uploaded mission route toward a safe-point
+ * branch-off, then leaves the route to land at the chosen safe point.
+ * Falls back to the closest mission endpoint when no safe point is available.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
+ */
+
 #pragma once
 
 #include "rtl_base.h"

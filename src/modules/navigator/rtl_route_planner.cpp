@@ -31,6 +31,16 @@
  *
  ****************************************************************************/
 
+/**
+ * @file rtl_route_planner.cpp
+ *
+ * Route planner for safe-point RTL (RTL_TYPE = 6).  Projects the vehicle
+ * and every safe point onto the uploaded mission geometry, then selects
+ * the goal with the shortest along-route cost.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
+ */
+
 #include "rtl_route_planner.h"
 
 #include <lib/geo/geo.h>

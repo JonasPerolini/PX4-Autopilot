@@ -32,15 +32,17 @@
  ****************************************************************************/
 
 /**
- * @file RtlTransitionTest.cpp
+ * @file test_RTL_transition.cpp
  *
  * Unit tests for VTOL transition detection in RtlRoutePlanner.
  * Verifies that transitionActionForTargetIndex correctly identifies
  * front-transitions, back-transitions, and no-ops for various mission
  * layouts and vehicle configurations.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
-#include "RtlRoutePlannerTestHelpers.h"
+#include "test_RTL_helpers.h"
 #include <uORB/topics/vtol_vehicle_status.h>
 
 static constexpr double kBaseLat = 47.397742;

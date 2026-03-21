@@ -32,15 +32,17 @@
  ****************************************************************************/
 
 /**
- * @file RtlProjectionTest.cpp
+ * @file test_RTL_projection.cpp
  *
  * Google Test suite for RtlRoutePlanner vehicle projection and
  * candidate detection behavior. Tests how the vehicle projects onto
  * the mission route and how projection candidates are detected.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
-#include "RtlRoutePlannerTestHelpers.h"
-#include "RtlRoutePlannerTestData.h"
+#include "test_RTL_helpers.h"
+#include "test_RTL_data.h"
 
 static constexpr double kBaseLat = 47.397742;
 static constexpr double kBaseLon = 8.545594;

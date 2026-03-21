@@ -32,7 +32,7 @@
  ****************************************************************************/
 
 /**
- * @file RtlRoutePlannerTestData.h
+ * @file test_RTL_data.h
  *
  * Reusable mission and safe-point datasets for RtlRoutePlanner tests.
  *
@@ -44,11 +44,13 @@
  *   index 8 (jumps to 2, repeat 7), a stacked landing waypoint, and
  *   8 rally points. Critical for testing corner pruning, loop handling,
  *   and small-segment edge cases.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
 #pragma once
 
-#include "RtlRoutePlannerTestHelpers.h"
+#include "test_RTL_helpers.h"
 
 #include <uORB/topics/vtol_vehicle_status.h>
 #include <vector>

@@ -32,15 +32,17 @@
  ****************************************************************************/
 
 /**
- * @file RtlPlannerIntegrationTest.cpp
+ * @file test_RTL_planner_integration.cpp
  *
  * End-to-end tests for RtlRoutePlanner::planRouteToGoal.
  * Covers fallback to mission endpoints, join altitude handling,
  * branch-off caching, safe-point selection, and error handling.
+ *
+ * @author Jonas Perolini <jonspero@me.com>
  */
 
-#include "RtlRoutePlannerTestHelpers.h"
-#include "RtlRoutePlannerTestData.h"
+#include "test_RTL_helpers.h"
+#include "test_RTL_data.h"
 
 #include <cmath>
 
