@@ -236,6 +236,8 @@ private:
 	DatamanClient	&_dataman_client_safepoint = _dataman_cache_safepoint.client();
 	bool _initiate_safe_points_updated{true}; ///< flag indicating if safe points update is needed
 	mutable DatamanCache _dataman_cache_landItem{"rtl_dm_cache_miss_land", 2};
+	mutable DatamanCache _dataman_cache_mission{"rtl_dm_cache_miss_mission", 0}; ///< pre-loaded mission items for non-blocking route planning
+	bool _mission_items_updated{false}; ///< flag indicating if all mission items are loaded into cache
 	uint32_t _mission_id = 0u;
 	uint32_t _safe_points_id = 0u;
 	PositionYawSetpoint _last_position_before_link_loss{(double)NAN, (double)NAN, NAN, NAN};
