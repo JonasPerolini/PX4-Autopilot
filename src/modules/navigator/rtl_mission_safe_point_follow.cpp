@@ -268,6 +268,7 @@ void RtlMissionSafePointFollow::setWaypointMissionItem(mission_item_s &mission_i
 		mission_item.acceptance_radius = 2.f * _navigator->get_acceptance_radius();
 	}
 
+	mission_item.yaw = NAN;
 	mission_item.time_inside = 0.f;
 	mission_item.autocontinue = autocontinue;
 	mission_item.origin = ORIGIN_ONBOARD;
@@ -639,6 +640,14 @@ void RtlMissionSafePointFollow::publishRouteItems(position_setpoint_triplet_s *p
 	}
 
 	issue_command(current_mission_item);
+
+	// Synchronize _mission_item with the published waypoint so that
+	// is_mission_item_reached_or_completed() checks the correct position.
+	// Without this, the reach check uses the raw dataman item (e.g. WP2) while
+	// the drone is actually flying to a virtual waypoint (e.g. branch-off projection
+	// on segment 1-2), causing the stage machine to stall or misbehave.
+	_mission_item = current_mission_item;
+
 	_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
 	reset_mission_item_reached();
 
