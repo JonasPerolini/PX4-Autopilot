@@ -101,8 +101,8 @@ private:
 	void updateLastFlownLoopSegmentFromPlan();
 	/** @brief Track the most recently flown loop edge so replans stay anchored on the active jump segment. */
 	void updateLastFlownLoopSegmentForNominalAdvance();
-	/** @brief Detect whether the selected route target implies a missed VTOL back-transition. */
-	bool missedBacktransitionBetweenIndices(int32_t target_index, bool reversed);
+	/** @brief Detect whether entering the segment at the given target requires a VTOL back-transition. */
+	bool requiresBacktransitionForTarget(int32_t target_index, bool reversed);
 	/** @brief Query the shared planner's segment-anchor logic for route-follow transition replay. */
 	RtlRoutePlanner::TransitionAction transitionActionForTargetIndex(int32_t target_index,
 			bool direction_reversed);

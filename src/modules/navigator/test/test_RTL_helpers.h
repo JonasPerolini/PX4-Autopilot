@@ -291,6 +291,7 @@ static inline RtlRoutePlanner::Config fwConfig()
 	config.is_multicopter = false;
 	config.vehicle_is_vtol = true;
 	config.vehicle_is_fixed_wing = true;
+	config.u_turn_penalty_m = 4000.f;
 	return config;
 }
 
@@ -298,9 +299,29 @@ static inline RtlRoutePlanner::Config fwConfig()
 // Tolerance constants
 // ============================================================================
 
-static constexpr double kLatLonToleranceDeg = 1e-4;     // ~11 m at equator
+static constexpr double kLatLonToleranceDeg = 1e-7;     // ~1 cm at equator
 static constexpr float kAltitudeTolerance = 2.0f;       // meters
 static constexpr float kDistanceTolerance = 5.0f;       // meters
+
+// ============================================================================
+// Test fixture base class
+// ============================================================================
+
+/**
+ * @brief Base fixture for RtlRoutePlanner tests.
+ *
+ * Provides default config, projection context, and failure reason as
+ * class members so individual tests do not need to repeat the same
+ * 3-line declaration block.  Tests that need a different config
+ * (e.g. fwConfig()) simply reassign the member.
+ */
+class RtlRoutePlannerTestBase : public ::testing::Test
+{
+protected:
+	RtlRoutePlanner::Config config = defaultConfig();
+	RtlRoutePlanner::ProjectionContext ctx{};
+	RtlRoutePlanner::FailureReason reason{};
+};
 
 // ============================================================================
 // Candidate / projection verification helpers

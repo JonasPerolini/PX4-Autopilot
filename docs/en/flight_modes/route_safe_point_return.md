@@ -84,7 +84,7 @@ The process for identifying valid projection candidates is identical to Phase 1 
 
 From the valid candidates, the system evaluates the travel path from each projection point to the safe point destination and selects the one with the lowest total path cost. The cost is calculated based on the following factors:
  - Path Distance: The distance required to fly from the projected point along the mission path to the safe point goal.
- - U-turn Penalty: For Fixed-wing and VTOL-in-FW, a distance penalty (4,000 m) is added to the cost if the path requires the vehicle to perform a U-turn. This prioritizes forward-flowing paths.
+ - U-turn Penalty: For Fixed-wing and VTOL-in-FW, a distance penalty ([RTL_FW_UTURN_PEN](../advanced_config/parameter_reference.md#RTL_FW_UTURN_PEN), default 4,000 m) is added to the cost if the path requires the vehicle to perform a U-turn. This prioritizes forward-flowing paths. Reduce the value for smaller airframes with tighter turn radii, or set to 0 to disable the penalty.
 
 Safe points are loaded once and evaluated in one batched route scan:
 

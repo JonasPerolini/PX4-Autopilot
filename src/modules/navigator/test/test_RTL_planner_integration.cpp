@@ -50,13 +50,23 @@ static constexpr double kBaseLat = 47.397742;
 static constexpr double kBaseLon = 8.545594;
 static constexpr float kAlt = 500.f;
 
+// ============================================================================
+// Test fixture
+// ============================================================================
+
+class RtlPlannerIntegrationTest : public RtlRoutePlannerTestBase
+{
+protected:
+	RtlRoutePlanner::Plan plan{};
+};
+
 // =============================================================================
 // GROUP 1: Fallback to mission endpoints when no safe points exist
 // =============================================================================
 
 // WHY: When no safe points are configured, the planner must fall back to mission endpoints.
 // WHAT: A vehicle close to the landing waypoint should select MissionLand as goal.
-TEST(RtlPlannerIntegrationTest, FallsBackToMissionLandWhenNoSafePoints)
+TEST_F(RtlPlannerIntegrationTest, FallsBackToMissionLandWhenNoSafePoints)
 {
 	// GIVEN: A 4-waypoint mission (takeoff -> wp -> wp -> land) with no safe points.
 	auto items = std::vector<mission_item_s> {
@@ -71,9 +81,7 @@ TEST(RtlPlannerIntegrationTest, FallsBackToMissionLandWhenNoSafePoints)
 
 	// Vehicle is at N+260, close to the landing waypoint.
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 260.f, 0.f, kAlt + 25.f);
-	auto config = fwConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
+	config = fwConfig();
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 2, config, plan, &reason);
@@ -88,7 +96,7 @@ TEST(RtlPlannerIntegrationTest, FallsBackToMissionLandWhenNoSafePoints)
 
 // WHY: When the vehicle is near takeoff and the path back is shorter, the planner should prefer MissionTakeoff.
 // WHAT: Vehicle at N+40 with a long mission extending to N+5200 should select takeoff with a reversed path.
-TEST(RtlPlannerIntegrationTest, FallsBackToMissionTakeoffWhenPathIsShorter)
+TEST_F(RtlPlannerIntegrationTest, FallsBackToMissionTakeoffWhenPathIsShorter)
 {
 	// GIVEN: A 4-waypoint mission where land is far away (N+5200).
 	auto items = std::vector<mission_item_s> {
@@ -103,12 +111,10 @@ TEST(RtlPlannerIntegrationTest, FallsBackToMissionTakeoffWhenPathIsShorter)
 
 	// Vehicle is at N+40, close to takeoff.
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 40.f, 0.f, kAlt + 10.f);
-	auto config = fwConfig();
+	config = fwConfig();
 	config.vehicle_velocity_north = 15.f;
 	config.vehicle_velocity_east = 0.f;
 	config.vehicle_velocity_valid = true;
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -125,7 +131,7 @@ TEST(RtlPlannerIntegrationTest, FallsBackToMissionTakeoffWhenPathIsShorter)
 
 // WHY: A safe point with an invalid frame should be rejected, causing fallback to a mission endpoint.
 // WHAT: One safe point with frame=15 is treated as invalid; planner falls back to an endpoint.
-TEST(RtlPlannerIntegrationTest, FallsBackWhenAllSafePointsInvalid)
+TEST_F(RtlPlannerIntegrationTest, FallsBackWhenAllSafePointsInvalid)
 {
 	// GIVEN: The default dataset mission with one safe point that has an invalid frame (15).
 	auto items = default_dataset::mission();
@@ -145,9 +151,6 @@ TEST(RtlPlannerIntegrationTest, FallsBackWhenAllSafePointsInvalid)
 
 	// Vehicle at N+50 from first waypoint.
 	auto vehicle_pos = makePositionFromOffset(items[0].lat, items[0].lon, 50.f, 0.f, 560.f);
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -165,7 +168,7 @@ TEST(RtlPlannerIntegrationTest, FallsBackWhenAllSafePointsInvalid)
 
 // WHY: When a fixed-wing vehicle is close to the land waypoint, it should skip the altitude requirement.
 // WHAT: Vehicle near land at alt=523 gets skip_altitude_requirement=true and join alt=vehicle alt.
-TEST(RtlPlannerIntegrationTest, SkipsAltitudeRequirementNearLand)
+TEST_F(RtlPlannerIntegrationTest, SkipsAltitudeRequirementNearLand)
 {
 	// GIVEN: A 3-waypoint mission (takeoff -> wp -> land).
 	auto items = std::vector<mission_item_s> {
@@ -179,10 +182,8 @@ TEST(RtlPlannerIntegrationTest, SkipsAltitudeRequirementNearLand)
 
 	// Vehicle at (N+200, E+0, alt=523), near landing.
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, 523.f);
-	auto config = fwConfig();
+	config = fwConfig();
 	config.acceptance_radius = 20.f;
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 1, config, plan, &reason);
@@ -196,7 +197,7 @@ TEST(RtlPlannerIntegrationTest, SkipsAltitudeRequirementNearLand)
 
 // WHY: Corner dataset missions with the vehicle near land should also skip altitude requirements.
 // WHAT: Vehicle near the corner dataset land waypoint gets skip_altitude_requirement=true.
-TEST(RtlPlannerIntegrationTest, CornerMission_SkipAltitudeNearLand)
+TEST_F(RtlPlannerIntegrationTest, CornerMission_SkipAltitudeNearLand)
 {
 	// GIVEN: Corner dataset mission with no safe points.
 	auto items = corner_dataset::mission();
@@ -206,12 +207,10 @@ TEST(RtlPlannerIntegrationTest, CornerMission_SkipAltitudeNearLand)
 
 	// Vehicle very near the land waypoint.
 	auto vehicle_pos = makePositionAbsolute(46.10451291425605, 2.3176006267546034, 462.2f);
-	auto config = fwConfig();
+	config = fwConfig();
 	config.acceptance_radius = 100.f;
 	config.vehicle_projection_search_dist = 10.f;
 	config.safe_point_projection_search_dist = 10.f;
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 12, config, plan, &reason);
@@ -231,7 +230,7 @@ TEST(RtlPlannerIntegrationTest, CornerMission_SkipAltitudeNearLand)
 
 // WHY: The cached branch-off segment should be reusable when the vehicle stays close.
 // WHAT: closeToBranchOffSegment returns true for a vehicle near the cached leg, false when far away.
-TEST(RtlPlannerIntegrationTest, CloseToBranchOffSegmentUsesStoredLeg)
+TEST_F(RtlPlannerIntegrationTest, CloseToBranchOffSegmentUsesStoredLeg)
 {
 	// GIVEN: A 3-waypoint L-shaped mission.
 	auto items = std::vector<mission_item_s> {
@@ -244,7 +243,6 @@ TEST(RtlPlannerIntegrationTest, CloseToBranchOffSegmentUsesStoredLeg)
 	RtlRoutePlanner planner(provider);
 
 	// Manually build a Selection with branch_off on segment [1->2] at (N+100, E+60)
-	// and safe_point at (N+100, E+120).
 	RtlRoutePlanner::Selection selection{};
 	selection.found = true;
 	selection.safe_point_found = true;
@@ -278,7 +276,7 @@ TEST(RtlPlannerIntegrationTest, CloseToBranchOffSegmentUsesStoredLeg)
 
 // WHY: With no rally points, the planner should fall back to MissionLand when the vehicle is past the midpoint.
 // WHAT: Vehicle in the latter part of the corner mission selects MissionLand with forward direction.
-TEST(RtlPlannerIntegrationTest, SrpFallbackToLandWhenNoRallyPoints)
+TEST_F(RtlPlannerIntegrationTest, SrpFallbackToLandWhenNoRallyPoints)
 {
 	// GIVEN: Corner dataset mission with empty safe points.
 	auto items = corner_dataset::mission();
@@ -287,14 +285,12 @@ TEST(RtlPlannerIntegrationTest, SrpFallbackToLandWhenNoRallyPoints)
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionAbsolute(46.10451291425605, 2.3176006267546034, 560.f);
-	auto config = fwConfig();
+	config = fwConfig();
 	config.vehicle_projection_search_dist = 10.f;
 	config.safe_point_projection_search_dist = 10.f;
 	config.vehicle_velocity_north = corner_dataset::kVelDiag;
 	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
 	config.vehicle_velocity_valid = true;
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called with mission_index=4.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 4, config, plan, &reason);
@@ -307,7 +303,7 @@ TEST(RtlPlannerIntegrationTest, SrpFallbackToLandWhenNoRallyPoints)
 
 // WHY: With no rally points and vehicle near takeoff, the planner should fall back to MissionTakeoff.
 // WHAT: Vehicle near the start of the corner mission selects MissionTakeoff with reversed direction.
-TEST(RtlPlannerIntegrationTest, SrpFallbackToTakeoffWhenNoRallyPoints)
+TEST_F(RtlPlannerIntegrationTest, SrpFallbackToTakeoffWhenNoRallyPoints)
 {
 	// GIVEN: Corner dataset mission with empty safe points.
 	auto items = corner_dataset::mission();
@@ -316,12 +312,9 @@ TEST(RtlPlannerIntegrationTest, SrpFallbackToTakeoffWhenNoRallyPoints)
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionAbsolute(46.101868043118436, 2.3261360396086284, 540.f);
-	auto config = defaultConfig();  // MC — no u-turn penalty, so reverse to takeoff is cheaper
 	config.vehicle_velocity_north = corner_dataset::kVelDiag;
 	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
 	config.vehicle_velocity_valid = true;
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called with mission_index=0.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -334,7 +327,7 @@ TEST(RtlPlannerIntegrationTest, SrpFallbackToTakeoffWhenNoRallyPoints)
 
 // WHY: When a valid rally point exists, the planner must select it instead of falling back to an endpoint.
 // WHAT: Corner dataset with safe points and vehicle 5m along takeoff->wp1 bearing selects SafePoint.
-TEST(RtlPlannerIntegrationTest, SafePointFoundDoesNotUseFallback)
+TEST_F(RtlPlannerIntegrationTest, SafePointFoundDoesNotUseFallback)
 {
 	// GIVEN: Corner dataset mission with safe points.
 	auto items = corner_dataset::mission();
@@ -347,10 +340,6 @@ TEST(RtlPlannerIntegrationTest, SafePointFoundDoesNotUseFallback)
 	double vehicle_lat, vehicle_lon;
 	waypoint_from_heading_and_distance(items[0].lat, items[0].lon, bearing, 5.f, &vehicle_lat, &vehicle_lon);
 	auto vehicle_pos = makePositionAbsolute(vehicle_lat, vehicle_lon, items[0].altitude + 10.f);
-
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -367,7 +356,7 @@ TEST(RtlPlannerIntegrationTest, SafePointFoundDoesNotUseFallback)
 
 // WHY: An empty mission has no waypoints to follow; planning must fail cleanly.
 // WHAT: planRouteToGoal returns false with reason NoValidWaypoints.
-TEST(RtlPlannerIntegrationTest, FailsWithEmptyMission)
+TEST_F(RtlPlannerIntegrationTest, FailsWithEmptyMission)
 {
 	// GIVEN: An empty mission.
 	std::vector<mission_item_s> empty_mission{};
@@ -376,9 +365,6 @@ TEST(RtlPlannerIntegrationTest, FailsWithEmptyMission)
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt);
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -390,7 +376,7 @@ TEST(RtlPlannerIntegrationTest, FailsWithEmptyMission)
 
 // WHY: A single waypoint cannot form a segment; planning must fail.
 // WHAT: planRouteToGoal returns false with reason NoValidWaypoints.
-TEST(RtlPlannerIntegrationTest, FailsWithSingleWaypoint)
+TEST_F(RtlPlannerIntegrationTest, FailsWithSingleWaypoint)
 {
 	// GIVEN: A mission with only one waypoint.
 	auto items = std::vector<mission_item_s> {
@@ -401,9 +387,6 @@ TEST(RtlPlannerIntegrationTest, FailsWithSingleWaypoint)
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -415,7 +398,7 @@ TEST(RtlPlannerIntegrationTest, FailsWithSingleWaypoint)
 
 // WHY: An invalid vehicle position (NAN lat) must be caught early.
 // WHAT: planRouteToGoal returns false when the vehicle latitude is NAN.
-TEST(RtlPlannerIntegrationTest, FailsOnInvalidVehiclePosition)
+TEST_F(RtlPlannerIntegrationTest, FailsOnInvalidVehiclePosition)
 {
 	// GIVEN: The default dataset mission with safe points, but vehicle lat is NAN.
 	auto items = default_dataset::mission();
@@ -427,10 +410,6 @@ TEST(RtlPlannerIntegrationTest, FailsOnInvalidVehiclePosition)
 	vehicle_pos.lat = NAN;
 	vehicle_pos.lon = 2.300;
 	vehicle_pos.alt = 550.f;
-
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called with an invalid vehicle position.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -445,7 +424,7 @@ TEST(RtlPlannerIntegrationTest, FailsOnInvalidVehiclePosition)
 
 // WHY: When a safe point is available near the route midpoint, it should be preferred over mission endpoints.
 // WHAT: A 4-waypoint straight mission with a safe point near the midpoint selects SafePoint.
-TEST(RtlPlannerIntegrationTest, PlanRouteSelectsSafePointOverEndpoint)
+TEST_F(RtlPlannerIntegrationTest, PlanRouteSelectsSafePointOverEndpoint)
 {
 	// GIVEN: A 4-waypoint straight-line mission with a safe point near the midpoint.
 	auto items = std::vector<mission_item_s> {
@@ -462,9 +441,6 @@ TEST(RtlPlannerIntegrationTest, PlanRouteSelectsSafePointOverEndpoint)
 
 	// Vehicle near the start of the mission.
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt + 10.f);
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
@@ -480,7 +456,7 @@ TEST(RtlPlannerIntegrationTest, PlanRouteSelectsSafePointOverEndpoint)
 // WHY: When the vehicle is near takeoff but a valid safe point exists, the planner must NOT
 //      fall back to MissionTakeoff. The safe point should take priority.
 // WHAT: Vehicle within 5m of takeoff in the corner dataset with safe points selects SafePoint.
-TEST(RtlPlannerIntegrationTest, PlanRouteNearTakeoffWithSafePointDoesNotFallbackToTakeoff)
+TEST_F(RtlPlannerIntegrationTest, PlanRouteNearTakeoffWithSafePointDoesNotFallbackToTakeoff)
 {
 	// GIVEN: Corner dataset mission with safe points. Vehicle within 5m of takeoff.
 	auto items = corner_dataset::mission();
@@ -493,10 +469,6 @@ TEST(RtlPlannerIntegrationTest, PlanRouteNearTakeoffWithSafePointDoesNotFallback
 	double vehicle_lat, vehicle_lon;
 	waypoint_from_heading_and_distance(items[0].lat, items[0].lon, bearing, 5.f, &vehicle_lat, &vehicle_lon);
 	auto vehicle_pos = makePositionAbsolute(vehicle_lat, vehicle_lon, items[0].altitude + 5.f);
-
-	auto config = defaultConfig();
-	RtlRoutePlanner::Plan plan{};
-	RtlRoutePlanner::FailureReason reason{};
 
 	// WHEN: planRouteToGoal is called.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);

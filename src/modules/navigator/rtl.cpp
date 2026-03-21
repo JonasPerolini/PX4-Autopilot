@@ -518,6 +518,7 @@ void RTL::setRtlTypeAndDestination()
 			config.vehicle_is_vtol = vehicle_status.is_vtol;
 			config.vehicle_is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
 			config.vehicle_in_transition_to_fw = vehicle_status.in_transition_to_fw;
+			config.u_turn_penalty_m = _param_rtl_fw_uturn_pen.get();
 			config.last_flown_loop_segment = _last_route_safe_point_loop_segment;
 
 			RtlRoutePlanner::Position vehicle_position{

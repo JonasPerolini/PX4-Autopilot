@@ -114,7 +114,7 @@ PARAM_DEFINE_FLOAT(RTL_MIN_DIST, 10.0f);
  * @value 3 Return via direct path to closest destination: home, start of mission landing pattern or safe point. If the destination is a mission landing pattern, follow the pattern to land.
  * @value 4 Return to the planned mission landing, or to home via the reverse mission path, whichever is closer by counting waypoints. Do not consider rally points.
  * @value 5 Return directly to safe landing point (do not consider mission landing and Home)
- * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Falls back to the closest mission endpoint (landing or takeoff) when no safe point is available. Uses RTL_MC_SEG_DIST, RTL_FW_SEG_DIST, RTL_RP_SEG_DIST for projection search distances.
+ * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Falls back to the closest mission endpoint (landing or takeoff) when no safe point is available. Uses RTL_MC_SEG_DIST, RTL_FW_SEG_DIST, RTL_RP_SEG_DIST for projection search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
  * @group Return Mode
  */
 PARAM_DEFINE_INT32(RTL_TYPE, 0);
@@ -250,3 +250,20 @@ PARAM_DEFINE_FLOAT(RTL_FW_SEG_DIST, 150.f);
  * @group Return Mode
  */
 PARAM_DEFINE_FLOAT(RTL_RP_SEG_DIST, 30.f);
+
+/**
+ * Fixed-wing U-turn distance penalty
+ *
+ * Virtual distance added to the along-route path cost when the route-safe-point
+ * planner (RTL_TYPE = 6) detects that a fixed-wing or VTOL-in-FW vehicle would
+ * need to perform a U-turn to reach a safe point. Higher values make the planner
+ * prefer forward-flowing paths over shorter but reversed ones. Set to 0 to disable
+ * the penalty entirely.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 0
+ * @increment 100
+ * @group Return Mode
+ */
+PARAM_DEFINE_FLOAT(RTL_FW_UTURN_PEN, 4000.f);

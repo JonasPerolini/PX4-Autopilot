@@ -49,11 +49,17 @@ static constexpr double kBaseLat = 47.397742;
 static constexpr double kBaseLon = 8.545594;
 static constexpr float kAlt = 500.f;
 
+// ============================================================================
+// Test fixture
+// ============================================================================
+
+class RtlTransitionTest : public RtlRoutePlannerTestBase {};
+
 // WHY: When flying reverse through a FW segment, the planner must detect that a back-transition
 //      to MC is needed before the vehicle can hover/reverse.
 // WHAT: transitionActionForTargetIndex returns BackTransition when a FW->MC transition sits
 //       between the anchor and the target.
-TEST(RtlTransitionTest, BackTransitionDetectedInReverse)
+TEST_F(RtlTransitionTest, BackTransitionDetectedInReverse)
 {
 	// GIVEN: A mission with a VTOL_FW transition followed by a VTOL_MC transition.
 	//        [WP(0,0), VTOL_FW, WP(N+100,0), VTOL_MC, WP(N+200,0)]
@@ -68,7 +74,6 @@ TEST(RtlTransitionTest, BackTransitionDetectedInReverse)
 	VectorProvider provider(mission, {});
 	RtlRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Config config = defaultConfig();
 	config.vehicle_is_vtol = true;
 	config.vehicle_is_fixed_wing = true;
 	config.is_multicopter = false;
@@ -85,7 +90,7 @@ TEST(RtlTransitionTest, BackTransitionDetectedInReverse)
 //      front-transition to FW is needed.
 // WHAT: transitionActionForTargetIndex returns FrontTransition when a MC->FW transition sits
 //       ahead in the reverse direction.
-TEST(RtlTransitionTest, FrontTransitionDetectedInReverse)
+TEST_F(RtlTransitionTest, FrontTransitionDetectedInReverse)
 {
 	// GIVEN: A mission with a VTOL_FW transition between two position items.
 	//        [WP(0,0), WP(N+100,0), VTOL_FW, WP(N+200,0)]
@@ -99,7 +104,6 @@ TEST(RtlTransitionTest, FrontTransitionDetectedInReverse)
 	VectorProvider provider(mission, {});
 	RtlRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Config config = defaultConfig();
 	config.vehicle_is_vtol = true;
 	config.is_multicopter = true;
 
@@ -113,8 +117,13 @@ TEST(RtlTransitionTest, FrontTransitionDetectedInReverse)
 
 // WHY: Non-VTOL vehicles (pure multicopters or fixed-wing) never need airframe transitions.
 // WHAT: transitionActionForTargetIndex returns None regardless of direction for non-VTOL vehicles.
-TEST(RtlTransitionTest, NonVtolAlwaysReturnsNone)
+// NOTE: Uses TEST_P to independently test both forward and reverse directions.
+class RtlNonVtolTransitionTest : public RtlRoutePlannerTestBase, public ::testing::WithParamInterface<bool> {};
+
+TEST_P(RtlNonVtolTransitionTest, NonVtolAlwaysReturnsNone)
 {
+	const bool is_reversed = GetParam();
+
 	// GIVEN: A mission with a VTOL_FW command, but a non-VTOL vehicle configuration.
 	//        [WP(0,0), VTOL_FW, WP(N+100,0)]
 	std::vector<mission_item_s> mission = {
@@ -126,23 +135,29 @@ TEST(RtlTransitionTest, NonVtolAlwaysReturnsNone)
 	VectorProvider provider(mission, {});
 	RtlRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Config config = defaultConfig();
 	config.vehicle_is_vtol = false;
 
-	// WHEN: We query the transition action in both forward and reverse directions.
-	auto action_forward = planner.transitionActionForTargetIndex(2, false, config);
-	auto action_reverse = planner.transitionActionForTargetIndex(2, true, config);
+	// WHEN: We query the transition action.
+	auto action = planner.transitionActionForTargetIndex(2, is_reversed, config);
 
-	// THEN: No transition action is returned in either direction.
-	EXPECT_EQ(action_forward, RtlRoutePlanner::TransitionAction::None);
-	EXPECT_EQ(action_reverse, RtlRoutePlanner::TransitionAction::None);
+	// THEN: No transition action is returned.
+	EXPECT_EQ(action, RtlRoutePlanner::TransitionAction::None);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+	Directions,
+	RtlNonVtolTransitionTest,
+	::testing::Values(false, true),
+	[](const ::testing::TestParamInfo<bool> &test_info) {
+		return test_info.param ? "Reverse" : "Forward";
+	}
+);
 
 // WHY: Real VTOL missions often have multiple mode transitions. The planner must correctly
 //      identify which transition affects each target segment.
 // WHAT: In a mission with 2 FW->MC transitions and 1 MC->FW transition, each target index
 //       yields the correct action depending on the vehicle's current flight mode.
-TEST(RtlTransitionTest, MultiTransitionMissionDetectsCorrectAction)
+TEST_F(RtlTransitionTest, MultiTransitionMissionDetectsCorrectAction)
 {
 	// GIVEN: A mission with multiple VTOL transitions:
 	//        [WP(0,0), VTOL_FW, WP(N+100,0), WP(N+200,0), VTOL_MC, WP(N+300,0),
@@ -176,20 +191,12 @@ TEST(RtlTransitionTest, MultiTransitionMissionDetectsCorrectAction)
 	configB.is_multicopter = true;
 
 	// WHEN/THEN: Target index 2 (in FW zone after VTOL_FW at idx 1), reverse direction.
-	//   The anchor (next position item after target) is idx 3 → getVtolStateAtAnchor
-	//   scans back: idx 1 is VTOL_FW → segment state is FW.
-	//   FW vehicle in FW zone → no transition needed (same mode).
-	//   MC vehicle in FW zone → front-transition needed.
 	EXPECT_EQ(planner.transitionActionForTargetIndex(2, true, configA),
 		  RtlRoutePlanner::TransitionAction::None);
 	EXPECT_EQ(planner.transitionActionForTargetIndex(2, true, configB),
 		  RtlRoutePlanner::TransitionAction::FrontTransition);
 
 	// WHEN/THEN: Target index 7 (in FW zone after VTOL_FW at idx 6), reverse direction.
-	//   The anchor is idx 9 (skipping VTOL_MC at idx 8 which is not a position item).
-	//   getVtolStateAtAnchor scans back: idx 8 is VTOL_MC → segment state is MC.
-	//   FW vehicle in MC zone → back-transition needed.
-	//   MC vehicle in MC zone → no transition needed (same mode).
 	EXPECT_EQ(planner.transitionActionForTargetIndex(7, true, configA),
 		  RtlRoutePlanner::TransitionAction::BackTransition);
 	EXPECT_EQ(planner.transitionActionForTargetIndex(7, true, configB),

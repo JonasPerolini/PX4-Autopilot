@@ -258,7 +258,8 @@ private:
 		(ParamInt<px4::params::RTL_APPR_FORCE>)    _param_rtl_appr_force,
 		(ParamFloat<px4::params::RTL_MC_SEG_DIST>) _param_rtl_mc_seg_dist,
 		(ParamFloat<px4::params::RTL_FW_SEG_DIST>) _param_rtl_fw_seg_dist,
-		(ParamFloat<px4::params::RTL_RP_SEG_DIST>) _param_rtl_rp_seg_dist
+		(ParamFloat<px4::params::RTL_RP_SEG_DIST>) _param_rtl_rp_seg_dist,
+		(ParamFloat<px4::params::RTL_FW_UTURN_PEN>) _param_rtl_fw_uturn_pen
 	)
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};

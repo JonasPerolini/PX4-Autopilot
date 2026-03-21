@@ -49,6 +49,7 @@
 #include <math.h>
 #include <stdint.h>
 
+#include <matrix/math.hpp>
 #include <px4_platform_common/defines.h>
 
 class RtlRoutePlanner
@@ -64,8 +65,6 @@ public:
 	 * If raised above 255, the constrain() in rtl.cpp::setRtlTypeAndDestination will silently truncate.
 	 */
 	static constexpr uint8_t MAX_SAFE_POINT_BATCH{64};
-	/** Fixed-wing U-turn penalty: approximate diameter of a standard FW holding pattern (~2 km turn radius with safety margin). */
-	static constexpr float kUturnPenaltyM{4000.f};
 
 	enum class GoalType : uint8_t {
 		None = 0,
@@ -221,6 +220,7 @@ public:
 		bool vehicle_is_vtol{false};
 		bool vehicle_is_fixed_wing{false};
 		bool vehicle_in_transition_to_fw{false};
+		float u_turn_penalty_m{4000.f};
 		Segment last_flown_loop_segment{};
 	};
 
@@ -350,7 +350,8 @@ private:
 	 */
 	void processCandidateForSegment(const Position &reference_position, const Segment &segment,
 					const SegmentPositions &segment_positions, float segment_length,
-					float total_dist, float extra_xtrack_dist, bool last_segment,
+					const matrix::Vector2f &segment_vector, float total_dist,
+					float extra_xtrack_dist, bool last_segment,
 					bool segment_has_no_length, CandidateSearchState &state,
 					uint32_t &local_min_found, uint32_t &valid_candidate_found,
 					CandidateBuffer &candidate_buffer) const;

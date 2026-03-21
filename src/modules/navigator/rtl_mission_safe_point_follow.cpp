@@ -79,8 +79,8 @@ void RtlMissionSafePointFollow::setRoutePlan(const RtlRoutePlanner::Plan &plan)
 
 	if (_plan.valid()) {
 		_plan.join_context.vtol_back_transition_required =
-			missedBacktransitionBetweenIndices(_plan.selection.path.first_item_index,
-					_plan.selection.path.direction_reversed);
+			requiresBacktransitionForTarget(_plan.selection.path.first_item_index,
+							_plan.selection.path.direction_reversed);
 	}
 }
 
@@ -546,9 +546,11 @@ bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_it
 }
 
 /**
- * @brief Check whether a route target implies a missed back transition on the way to the join point.
+ * @brief Check whether entering the segment at the given target requires a VTOL back-transition.
+ *
+ * Only inspects the entry state for the single target_index, not the entire path between two indices.
  */
-bool RtlMissionSafePointFollow::missedBacktransitionBetweenIndices(int32_t target_index, bool reversed)
+bool RtlMissionSafePointFollow::requiresBacktransitionForTarget(int32_t target_index, bool reversed)
 {
 	if (!_navigator->get_vstatus()->is_vtol || target_index < 0) {
 		return false;

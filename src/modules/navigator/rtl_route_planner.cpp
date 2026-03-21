@@ -575,7 +575,6 @@ bool RtlRoutePlanner::isIndexInProjectionSegment(const Segment &projection_segme
 	return mission_index > projection_segment.start.idx && mission_index <= projection_segment.end.idx;
 }
 
-/** @brief Evaluate one reference position against one mission segment and keep locally optimal projections. */
 /**
  * @brief Evaluate one mission segment for one reference point and keep only locally minimal projections.
  *
@@ -602,7 +601,8 @@ bool RtlRoutePlanner::isIndexInProjectionSegment(const Segment &projection_segme
  *   9. Insert the candidate into the buffer sorted by xtrack (up to MAX_SEGMENT_CANDIDATES = 3).
  */
 void RtlRoutePlanner::processCandidateForSegment(const Position &reference_position, const Segment &segment,
-		const SegmentPositions &segment_positions, float segment_length, float total_dist,
+		const SegmentPositions &segment_positions, float segment_length,
+		const matrix::Vector2f &segment_vector, float total_dist,
 		float extra_xtrack_dist, bool last_segment, bool segment_has_no_length,
 		CandidateSearchState &state, uint32_t &local_min_found, uint32_t &valid_candidate_found,
 		CandidateBuffer &candidate_buffer) const
@@ -625,12 +625,9 @@ void RtlRoutePlanner::processCandidateForSegment(const Position &reference_posit
 
 	} else {
 		// --- Step 2: Orthogonal projection onto the segment ---
-		matrix::Vector2f segment_vector;   // Vector A→B (segment start to end)
+		// segment_vector (A→B) is pre-computed by the caller once per segment.
 		matrix::Vector2f reference_vector; // Vector A→P (segment start to reference point)
 
-		get_vector_to_next_waypoint(segment_positions.start.lat, segment_positions.start.lon,
-					    segment_positions.end.lat, segment_positions.end.lon,
-					    &segment_vector(0), &segment_vector(1));
 		get_vector_to_next_waypoint(segment_positions.start.lat, segment_positions.start.lon,
 					    reference_position.lat, reference_position.lon,
 					    &reference_vector(0), &reference_vector(1));
@@ -832,8 +829,19 @@ bool RtlRoutePlanner::findProjectionCandidatesBatch(int32_t mission_index, float
 		const float segment_length = segment_has_no_length ? 0.f : get_distance_to_next_waypoint(segment_positions.start.lat,
 					     segment_positions.start.lon, segment_positions.end.lat, segment_positions.end.lon);
 
+		// Compute the segment direction vector once per segment (expensive trig)
+		// rather than redundantly inside processCandidateForSegment for each safe point.
+		matrix::Vector2f segment_vector(0.f, 0.f);
+
+		if (!segment_has_no_length) {
+			get_vector_to_next_waypoint(segment_positions.start.lat, segment_positions.start.lon,
+						    segment_positions.end.lat, segment_positions.end.lon,
+						    &segment_vector(0), &segment_vector(1));
+		}
+
 		for (uint8_t i = 0; i < batch.count; ++i) {
-			processCandidateForSegment(batch.items[i].position, segment, segment_positions, segment_length, total_dist,
+			processCandidateForSegment(batch.items[i].position, segment, segment_positions, segment_length,
+						   segment_vector, total_dist,
 						   extra_xtrack_dist, last_segment, segment_has_no_length,
 						   batch_state.candidate_states[i], batch_state.local_min_found,
 						   batch_state.valid_candidate_found, batch.items[i].candidate_buffer);
@@ -1274,8 +1282,9 @@ RtlRoutePlanner::Path RtlRoutePlanner::findShortestPath(uint16_t goal_segment_en
 	const bool goal_is_on_jump_segment = (goal_segment_end_idx == projection_context.loop_ctx.segment.end.idx);
 	const bool on_jump_segment_and_goal_elsewhere = projection_context.loop_ctx.valid() && !goal_is_on_jump_segment;
 
-	const auto calculate_cost = [](float raw_distance, bool u_turn_required) {
-		return raw_distance + (u_turn_required ? kUturnPenaltyM : 0.f);
+	const float u_turn_penalty = config.u_turn_penalty_m;
+	const auto calculate_cost = [u_turn_penalty](float raw_distance, bool u_turn_required) {
+		return raw_distance + (u_turn_required ? u_turn_penalty : 0.f);
 	};
 
 	// --- Case 1: Normal path (no active loop, or goal on the same loop) ---
@@ -1432,6 +1441,9 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionCont
 	if (!projection_context.valid()) {
 		return selection;
 	}
+
+	// TODO: implement geofence-aware pruning: reject safe points and vehicle projections
+	// that would require crossing a geofence boundary.
 
 	s_safe_point_batch = {};
 
