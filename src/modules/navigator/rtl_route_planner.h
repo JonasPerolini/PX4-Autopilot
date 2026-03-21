@@ -289,14 +289,6 @@ public:
 	static const char *failureReasonString(FailureReason failure_reason);
 	static const char *goalTypeString(GoalType goal_type);
 
-private:
-	struct CandidateSearchState {
-		bool prev_proj_on_end{true};
-		bool proj_on_end_for_segment{false};
-		float min_xtrack{FLT_MAX};
-		float xtrack_limit{FLT_MAX};
-	};
-
 	struct SafePointBatchItem {
 		Position position{};
 		int32_t source_index{-1};
@@ -306,6 +298,14 @@ private:
 	struct SafePointBatch {
 		uint8_t count{0};
 		SafePointBatchItem items[MAX_SAFE_POINT_BATCH] {};
+	};
+
+private:
+	struct CandidateSearchState {
+		bool prev_proj_on_end{true};
+		bool proj_on_end_for_segment{false};
+		float min_xtrack{FLT_MAX};
+		float xtrack_limit{FLT_MAX};
 	};
 
 	struct BatchSearchState {

@@ -41,6 +41,14 @@
 
 using namespace math;
 
+/**
+ * Shared static SafePointBatch to keep the ~25 KB struct off the stack on
+ * constrained targets.  All three call-sites (findProjectionCandidates,
+ * collectVehicleProjection, selectSafePoint) reinitialize the batch before
+ * use and are never called concurrently
+ */
+static RtlRoutePlanner::SafePointBatch s_safe_point_batch{};
+
 const char *RtlRoutePlanner::failureReasonString(FailureReason failure_reason)
 {
 	switch (failure_reason) {
@@ -914,19 +922,16 @@ bool RtlRoutePlanner::findProjectionCandidates(const Position &reference_positio
 		return false;
 	}
 
-	// Static to keep the ~25 KB SafePointBatch off the stack.  Only one item
-	// is used here, but the struct is fixed-size.  Warning: not thread-safe.
-	static SafePointBatch batch{};
-	batch = {};
-	batch.count = 1;
-	batch.items[0].position = reference_position;
+	s_safe_point_batch = {};
+	s_safe_point_batch.count = 1;
+	s_safe_point_batch.items[0].position = reference_position;
 
 	const bool any_candidate_found = findProjectionCandidatesBatch(mission_index, home_altitude_amsl, is_flying_reverse,
-					 extra_xtrack_dist, Segment{}, batch,
+					 extra_xtrack_dist, Segment{}, s_safe_point_batch,
 					 dist_along_to_last_flown_segment, dist_along_to_route_end,
 					 loops_remaining, failure_reason);
 
-	candidate_buffer = batch.items[0].candidate_buffer;
+	candidate_buffer = s_safe_point_batch.items[0].candidate_buffer;
 	return any_candidate_found && candidate_buffer.count > 0;
 }
 
@@ -960,25 +965,22 @@ bool RtlRoutePlanner::collectVehicleProjection(const Position &vehicle_position,
 			static_cast<int>(requested_mission_index), static_cast<int>(mission_index));
 	}
 
-	// Static to keep the ~25 KB SafePointBatch off the stack.  Only one item
-	// is used here, but the struct is fixed-size.  Warning: not thread-safe.
-	static SafePointBatch batch{};
-	batch = {};
-	batch.count = 1;
-	batch.items[0].position = vehicle_position;
+	s_safe_point_batch = {};
+	s_safe_point_batch.count = 1;
+	s_safe_point_batch.items[0].position = vehicle_position;
 	SegmentDistanceAlong dist_along_to_last_flown_segment{};
 	float dist_along_to_route_end = 0.f;
 	uint8_t loops_remaining = 0;
 
 	if (!findProjectionCandidatesBatch(mission_index, config.home_altitude_amsl,
 					   config.is_flying_reverse, config.vehicle_projection_search_dist,
-					   config.last_flown_loop_segment, batch,
+					   config.last_flown_loop_segment, s_safe_point_batch,
 					   &dist_along_to_last_flown_segment, &dist_along_to_route_end,
 					   &loops_remaining, failure_reason)) {
 		return false;
 	}
 
-	const CandidateBuffer &candidate_buffer = batch.items[0].candidate_buffer;
+	const CandidateBuffer &candidate_buffer = s_safe_point_batch.items[0].candidate_buffer;
 
 	PX4_DEBUG("RTL SRP select UAV proj: cand cnt: %u dist_proj_to_last_flown[%.1f; %.1f] mis_idx=%d",
 		  candidate_buffer.count,
@@ -1421,13 +1423,9 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionCont
 		return selection;
 	}
 
-	// SafePointBatch is ~25 KB (64 items with candidate buffers); allocate it
-	// statically to avoid stack overflow on constrained targets.
-	// Warning: not thread-safe — matches the legacy PositionBatch pattern.
-	static SafePointBatch batch{};
-	batch = {};
+	s_safe_point_batch = {};
 
-	if (!loadSafePointBatch(config.home_altitude_amsl, batch)) {
+	if (!loadSafePointBatch(config.home_altitude_amsl, s_safe_point_batch)) {
 		PX4_DEBUG("RTL SRP search: no safe points available");
 		return selection;
 	}
@@ -1436,15 +1434,15 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionCont
 
 	if (!findProjectionCandidatesBatch(INT32_MAX, config.home_altitude_amsl, false,
 					   config.safe_point_projection_search_dist, Segment{},
-					   batch, nullptr, nullptr, nullptr, &failure_reason)) {
+					   s_safe_point_batch, nullptr, nullptr, nullptr, &failure_reason)) {
 		PX4_DEBUG("RTL SRP safe point batch scan failed: %s", failureReasonString(failure_reason));
 		return selection;
 	}
 
-	for (uint8_t batch_index = 0; batch_index < batch.count; ++batch_index) {
-		const Position &safe_point_position = batch.items[batch_index].position;
-		const int32_t safe_point_index = batch.items[batch_index].source_index;
-		const CandidateBuffer &candidate_buffer = batch.items[batch_index].candidate_buffer;
+	for (uint8_t batch_index = 0; batch_index < s_safe_point_batch.count; ++batch_index) {
+		const Position &safe_point_position = s_safe_point_batch.items[batch_index].position;
+		const int32_t safe_point_index = s_safe_point_batch.items[batch_index].source_index;
+		const CandidateBuffer &candidate_buffer = s_safe_point_batch.items[batch_index].candidate_buffer;
 		Path best_path{};
 		int best_projection_index = -1;
 
@@ -1463,6 +1461,7 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectSafePoint(const ProjectionCont
 				continue;
 			}
 
+			// TODO: include the cross-track in the computation of the shortest path to ensure that we minimize the overall distance.
 			const Path path = findShortestPath(projection_candidate.segment.end.idx,
 							   projection_candidate.dist.along,
 							   projection_context, config);

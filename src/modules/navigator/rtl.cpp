@@ -449,7 +449,7 @@ void RTL::setRtlTypeAndDestination()
 	_route_safe_point_plan = {};
 	const bool cached_should_go_straight_to_safe_point = _should_go_straight_to_safe_point;
 
-	if (_param_rtl_type.get() != 6) {
+	if (_param_rtl_type.get() != RTL_TYPE_ROUTE_SAFE_POINT) {
 		_should_go_straight_to_safe_point = false;
 	}
 
