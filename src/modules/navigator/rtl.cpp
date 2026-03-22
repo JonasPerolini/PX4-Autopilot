@@ -570,7 +570,6 @@ void RTL::setRtlTypeAndDestination()
 			config.vehicle_velocity_valid = PX4_ISFINITE(local_position->vx) && PX4_ISFINITE(local_position->vy);
 			config.vehicle_velocity_north = local_position->vx;
 			config.vehicle_velocity_east = local_position->vy;
-			config.vehicle_is_vtol = vehicle_status.is_vtol;
 			config.vehicle_is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
 			config.vehicle_in_transition_to_fw = vehicle_status.in_transition_to_fw;
 			config.u_turn_penalty_m = _param_rtl_fw_uturn_pen.get();
@@ -622,12 +621,11 @@ void RTL::setRtlTypeAndDestination()
 					_should_go_straight_to_safe_point = cached_should_go_straight_to_safe_point
 									    || _route_safe_point_plan.selection.direct_to_safe_point;
 
-					PX4_DEBUG("RTL type 6 planned goal=%s target=%d rev=%u direct=%u bt=%u",
+					PX4_DEBUG("RTL type 6 planned goal=%s target=%d rev=%u direct=%u",
 						  RtlRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
 						  static_cast<int>(_route_safe_point_plan.selection.path.first_item_index),
 						  static_cast<unsigned>(_route_safe_point_plan.selection.path.direction_reversed),
-						  static_cast<unsigned>(_should_go_straight_to_safe_point),
-						  static_cast<unsigned>(_route_safe_point_plan.join_context.vtol_back_transition_required));
+						  static_cast<unsigned>(_should_go_straight_to_safe_point));
 
 				} else {
 					PX4_WARN("RTL type 6 planning failed: %s", RtlRoutePlanner::failureReasonString(failure_reason));

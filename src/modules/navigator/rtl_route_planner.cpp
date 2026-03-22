@@ -47,7 +47,6 @@
 #include <mathlib/mathlib.h>
 
 #include <px4_platform_common/log.h>
-#include <uORB/topics/vtol_vehicle_status.h>
 
 using namespace math;
 
@@ -1407,111 +1406,6 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectBestGoal(const ProjectionConte
 	return selectMissionEndpointFallback(projection_context, config);
 }
 
-uint8_t RtlRoutePlanner::getVtolStateAtAnchor(uint16_t anchor_index) const
-{
-	for (int32_t index = static_cast<int32_t>(anchor_index); index >= 0; --index) {
-		mission_item_s mission_item{};
-
-		if (!_provider.loadMissionItem(index, mission_item)) {
-			return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-		}
-
-		if (mission_item.nav_cmd == NAV_CMD_DO_VTOL_TRANSITION) {
-			const int transition_mode = static_cast<int>(roundf(mission_item.params[0]));
-
-			if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC) {
-				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-
-			} else if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
-				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW;
-			}
-		}
-	}
-
-	return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-}
-
-bool RtlRoutePlanner::findSegmentAnchorForTargetIndex(int32_t target_index, bool direction_reversed,
-		uint16_t &anchor_index) const
-{
-	if (target_index < 0 || target_index >= _provider.missionCount()) {
-		return false;
-	}
-
-	int32_t anchor_search_start_index = target_index;
-
-	if (direction_reversed) {
-		if (target_index >= (_provider.missionCount() - 1)) {
-			return false;
-		}
-
-		anchor_search_start_index = target_index + 1;
-	}
-
-	for (int32_t index = anchor_search_start_index; index < _provider.missionCount(); ++index) {
-		mission_item_s mission_item{};
-
-		if (!_provider.loadMissionItem(index, mission_item)) {
-			return false;
-		}
-
-		if (itemContainsPosition(mission_item)) {
-			anchor_index = static_cast<uint16_t>(index);
-			return true;
-		}
-	}
-
-	return false;
-}
-
-bool RtlRoutePlanner::joinRequiresBackTransition(int32_t target_index, bool direction_reversed,
-		const Config &config) const
-{
-	if (!config.vehicle_is_vtol || target_index < 0 || _provider.missionCount() == 0) {
-		return false;
-	}
-
-	if (!(config.vehicle_is_fixed_wing || config.vehicle_in_transition_to_fw)) {
-		return false;
-	}
-
-	uint16_t segment_anchor_index{};
-
-	if (!findSegmentAnchorForTargetIndex(target_index, direction_reversed, segment_anchor_index)) {
-		return false;
-	}
-
-	const uint8_t target_segment_state = getVtolStateAtAnchor(segment_anchor_index);
-	return target_segment_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
-}
-
-RtlRoutePlanner::TransitionAction RtlRoutePlanner::transitionActionForTargetIndex(int32_t target_index,
-		bool direction_reversed, const Config &config) const
-{
-	if (!config.vehicle_is_vtol) {
-		return TransitionAction::None;
-	}
-
-	uint16_t segment_anchor_index{};
-
-	if (!findSegmentAnchorForTargetIndex(target_index, direction_reversed, segment_anchor_index)) {
-		return TransitionAction::None;
-	}
-
-	const uint8_t target_segment_state = getVtolStateAtAnchor(segment_anchor_index);
-	const bool currently_fw = config.vehicle_is_fixed_wing || config.vehicle_in_transition_to_fw;
-
-	if (target_segment_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC && currently_fw) {
-		return TransitionAction::BackTransition;
-	}
-
-	if (target_segment_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW && !currently_fw) {
-		return TransitionAction::FrontTransition;
-	}
-
-	return TransitionAction::None;
-}
-
 bool RtlRoutePlanner::closeToBranchOffSegment(const Position &position, const Selection &selection,
 		float acceptance_radius) const
 {
@@ -1573,8 +1467,6 @@ bool RtlRoutePlanner::planRouteToGoal(const Position &vehicle_position, int32_t 
 	}
 
 	plan.join_context.projection = plan.projection_context.seg_candidate.projection;
-	plan.join_context.vtol_back_transition_required = joinRequiresBackTransition(plan.selection.path.first_item_index,
-			plan.selection.path.direction_reversed, config);
 
 	// Landing fallback keeps the current altitude if the landing item is already within XY acceptance radius.
 	if (plan.selection.goal_type == GoalType::MissionLand && plan.selection.path.in_first_item_acc_rad) {
@@ -1586,14 +1478,13 @@ bool RtlRoutePlanner::planRouteToGoal(const Position &vehicle_position, int32_t 
 		*failure_reason = FailureReason::None;
 	}
 
-	PX4_DEBUG("RTL SRP plan goal=%s target=%d rev=%u direct=%u branch_off[%d;%d] bt=%u",
+	PX4_DEBUG("RTL SRP plan goal=%s target=%d rev=%u direct=%u branch_off[%d;%d]",
 		  goalTypeString(plan.selection.goal_type),
 		  static_cast<int>(plan.selection.path.first_item_index),
 		  static_cast<unsigned>(plan.selection.path.direction_reversed),
 		  static_cast<unsigned>(plan.selection.direct_to_safe_point),
 		  static_cast<int>(plan.selection.branch_off_segment.start.idx),
-		  static_cast<int>(plan.selection.branch_off_segment.end.idx),
-		  static_cast<unsigned>(plan.join_context.vtol_back_transition_required));
+		  static_cast<int>(plan.selection.branch_off_segment.end.idx));
 
 	return plan.valid();
 }

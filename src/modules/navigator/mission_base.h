@@ -330,7 +330,7 @@ protected:
 	 * @param[out] mission_item The loaded mission item
 	 * @return true if the item was loaded successfully
 	 */
-	bool loadMissionItemFromCache(int32_t index, mission_item_s &mission_item);
+	virtual bool loadMissionItemFromCache(int32_t index, mission_item_s &mission_item);
 
 	/**
 	 * @brief Find the next position-bearing mission item, skipping DO_JUMP items.

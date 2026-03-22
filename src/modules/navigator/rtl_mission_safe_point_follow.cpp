@@ -75,7 +75,7 @@ void RtlMissionSafePointFollow::setRoutePlan(const RtlRoutePlanner::Plan &plan)
 	}
 
 	if (_plan.valid()) {
-		_plan.join_context.vtol_back_transition_required =
+		_join_requires_back_transition =
 			vtolTransitionActionForTarget(_plan.selection.path.first_item_index,
 						      _plan.selection.path.direction_reversed) == VtolTransitionAction::BackTransition;
 	}
@@ -190,7 +190,7 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 {
 	switch (_stage) {
 	case Stage::JoinRoute:
-		if (_plan.join_context.vtol_back_transition_required) {
+		if (_join_requires_back_transition) {
 			_stage = Stage::TransitionAfterJoin;
 			PX4_DEBUG("RTL SRP join route reached, applying BT before following route");
 
@@ -528,7 +528,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 			mission_item_s next_route_item = _mission_item;
 			normalizeRouteMissionItem(next_route_item);
 			setWaypointMissionItem(join_item, _plan.join_context.projection, true,
-					       _plan.join_context.vtol_back_transition_required);
+					       _join_requires_back_transition);
 
 			if (_plan.join_context.skip_altitude_requirement) {
 				join_item.altitude = _navigator->get_global_position()->alt;
@@ -539,7 +539,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 		}
 
 	case Stage::TransitionAfterJoin: {
-			if (_plan.join_context.vtol_back_transition_required
+			if (_join_requires_back_transition
 			    && (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
 				|| _vehicle_status_sub.get().in_transition_to_fw)
 			    && !_land_detected_sub.get().landed) {

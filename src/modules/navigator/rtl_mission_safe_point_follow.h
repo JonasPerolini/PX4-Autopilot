@@ -111,6 +111,7 @@ private:
 	Stage _stage{Stage::Idle};
 	int32_t _branch_off_index{-1};
 	bool _should_go_straight_to_goal{false};
+	bool _join_requires_back_transition{false}; /**< Whether the join requires a VTOL back-transition (computed by executor). */
 	RtlRoutePlanner::Segment _last_flown_loop_segment{};
 	int32_t _transition_target_index{-1}; /**< Mission index that triggered the current in-flight transition. */
 	RtlTimeEstimator _rtl_time_estimator; /**< Time estimator consistent with other RTL modes. */

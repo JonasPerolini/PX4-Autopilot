@@ -289,7 +289,6 @@ static inline RtlRoutePlanner::Config fwConfig()
 {
 	RtlRoutePlanner::Config config = defaultConfig();
 	config.is_multicopter = false;
-	config.vehicle_is_vtol = true;
 	config.vehicle_is_fixed_wing = true;
 	config.u_turn_penalty_m = 4000.f;
 	return config;

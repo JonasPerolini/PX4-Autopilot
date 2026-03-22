@@ -73,12 +73,6 @@ public:
 		MissionTakeoff
 	};
 
-	enum class TransitionAction : uint8_t {
-		None = 0,
-		FrontTransition,
-		BackTransition
-	};
-
 	struct Position {
 		double lat{NAN};
 		double lon{NAN};
@@ -265,7 +259,6 @@ public:
 
 	struct JoinContext {
 		Position projection{};
-		bool vtol_back_transition_required{false};
 		bool skip_altitude_requirement{false};
 
 		bool valid() const { return projection.valid(); }
@@ -290,7 +283,6 @@ public:
 		float vehicle_velocity_north{NAN};
 		float vehicle_velocity_east{NAN};
 		bool vehicle_velocity_valid{false};
-		bool vehicle_is_vtol{false};
 		bool vehicle_is_fixed_wing{false};
 		bool vehicle_in_transition_to_fw{false};
 		float u_turn_penalty_m{4000.f};
@@ -344,9 +336,6 @@ public:
 	/** @brief Check whether the vehicle is still close enough to the cached branch-off leg to keep flying straight to the goal. */
 	bool closeToBranchOffSegment(const Position &position, const Selection &selection,
 				     float acceptance_radius) const;
-	/** @brief Determine whether entering the segment containing @p target_index requires a VTOL front- or back-transition. */
-	TransitionAction transitionActionForTargetIndex(int32_t target_index, bool direction_reversed,
-			const Config &config) const;
 
 	static bool itemContainsPosition(const mission_item_s &mission_item);
 	static float getAbsoluteAltitudeForMissionItem(const mission_item_s &mission_item, float home_altitude_amsl);
@@ -469,14 +458,6 @@ private:
 						const Config &config) const;
 	/** @brief Clamp a mission index into the valid mission range before projection. */
 	bool clampMissionIndex(int32_t &mission_index) const;
-	/** @brief Return the VTOL state that applies to the segment ending at the given position anchor. */
-	uint8_t getVtolStateAtAnchor(uint16_t anchor_index) const;
-	/** @brief Map a target index to the segment-end anchor that defines its VTOL state. */
-	bool findSegmentAnchorForTargetIndex(int32_t target_index, bool direction_reversed,
-					     uint16_t &anchor_index) const;
-	/** @brief Detect whether joining or targeting a segment requires an immediate back transition. */
-	bool joinRequiresBackTransition(int32_t target_index, bool direction_reversed,
-					const Config &config) const;
 
 	const Provider &_provider;
 };
