@@ -709,20 +709,20 @@ TEST_F(RtlSafePointTest, HandlesLoopProjectionAndReverseJumpChoice)
 
 	ctx.vehicle_pos = vehicle_position;
 	ctx.mission_index = 2;
-	ctx.projection.segment.start.idx = 2;
-	ctx.projection.segment.start.nav_cmd = NAV_CMD_WAYPOINT;
-	ctx.projection.segment.end.idx = 0;
-	ctx.projection.segment.end.nav_cmd = NAV_CMD_WAYPOINT;
-	ctx.projection.segment.is_loop = true;
-	ctx.projection.segment_positions.start = loop_start;
-	ctx.projection.segment_positions.end = loop_end;
-	ctx.projection.projection = vehicle_position;
-	ctx.projection.dist.xtrack = 0.f;
-	ctx.projection.dist.along = 200.f + loop_segment_length / 2.f;
-	ctx.projection.dist.segment_length = loop_segment_length;
-	ctx.projection.dist.on_segment = loop_segment_length / 2.f;
-	ctx.loop_ctx.segment = ctx.projection.segment;
-	ctx.loop_ctx.segment_positions = ctx.projection.segment_positions;
+	ctx.seg_candidate.segment.start.idx = 2;
+	ctx.seg_candidate.segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	ctx.seg_candidate.segment.end.idx = 0;
+	ctx.seg_candidate.segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	ctx.seg_candidate.segment.is_loop = true;
+	ctx.seg_candidate.segment_positions.start = loop_start;
+	ctx.seg_candidate.segment_positions.end = loop_end;
+	ctx.seg_candidate.projection = vehicle_position;
+	ctx.seg_candidate.dist.xtrack = 0.f;
+	ctx.seg_candidate.dist.along = 200.f + loop_segment_length / 2.f;
+	ctx.seg_candidate.dist.segment_length = loop_segment_length;
+	ctx.seg_candidate.dist.on_segment = loop_segment_length / 2.f;
+	ctx.loop_ctx.segment = ctx.seg_candidate.segment;
+	ctx.loop_ctx.segment_positions = ctx.seg_candidate.segment_positions;
 	ctx.loop_ctx.along.start = 200.f;
 	ctx.loop_ctx.along.end = 0.f;
 

@@ -37,3 +37,4 @@ px4_add_functional_gtest(SRC test_RTL_projection.cpp LINKLIBS navigator_rtl_rout
 px4_add_functional_gtest(SRC test_RTL_safe_point.cpp LINKLIBS navigator_rtl_route_planner)
 px4_add_functional_gtest(SRC test_RTL_planner_integration.cpp LINKLIBS navigator_rtl_route_planner)
 px4_add_functional_gtest(SRC test_RTL_transition.cpp LINKLIBS navigator_rtl_route_planner)
+px4_add_functional_gtest(SRC test_RTL_executor_scenarios.cpp LINKLIBS navigator_rtl_route_planner)

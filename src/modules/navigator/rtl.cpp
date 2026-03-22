@@ -649,7 +649,7 @@ void RTL::setRtlTypeAndDestination()
 			}
 
 			new_rtl_type = RtlType::RTL_MISSION_SAFE_POINT_FOLLOW;
-			_last_route_safe_point_loop_segment = _route_safe_point_plan.projection_context.projection.segment;
+			_last_route_safe_point_loop_segment = _route_safe_point_plan.projection_context.seg_candidate.segment;
 			destination_type = _route_safe_point_plan.selection.safe_point_found
 					   ? DestinationType::DESTINATION_TYPE_SAFE_POINT
 					   : DestinationType::DESTINATION_TYPE_MISSION_LAND;

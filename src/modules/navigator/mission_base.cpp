@@ -46,6 +46,8 @@
 #include "mission_feasibility_checker.h"
 #include "navigator.h"
 
+#include <uORB/topics/vtol_vehicle_status.h>
+
 MissionBase::MissionBase(Navigator *navigator, int32_t dataman_cache_size_signed, uint8_t navigator_state_id) :
 	MissionBlock(navigator, navigator_state_id),
 	ModuleParams(navigator),
@@ -1060,6 +1062,134 @@ void MissionBase::setMissionIndex(int32_t index)
 		_mission.timestamp = hrt_absolute_time();
 		_mission_pub.publish(_mission);
 	}
+}
+
+bool MissionBase::loadMissionItemFromCache(int32_t index, mission_item_s &mission_item)
+{
+	return index >= 0
+	       && index < _mission.count
+	       && _dataman_cache.loadWait(static_cast<dm_item_t>(_mission.mission_dataman_id), index,
+					  reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
+					  MAX_DATAMAN_LOAD_WAIT);
+}
+
+bool MissionBase::findNextPositionIndexNoJump(int32_t start_index, int32_t &next_index)
+{
+	for (int32_t index = start_index; index < _mission.count; ++index) {
+		mission_item_s mission_item{};
+
+		if (!loadMissionItemFromCache(index, mission_item)) {
+			return false;
+		}
+
+		if (item_contains_position(mission_item)) {
+			next_index = index;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool MissionBase::findPreviousPositionIndexNoJump(int32_t start_index, int32_t &previous_index)
+{
+	for (int32_t index = start_index - 1; index >= 0; --index) {
+		mission_item_s mission_item{};
+
+		if (!loadMissionItemFromCache(index, mission_item)) {
+			return false;
+		}
+
+		if (mission_item.nav_cmd == NAV_CMD_DO_JUMP) {
+			continue;
+		}
+
+		if (item_contains_position(mission_item)) {
+			previous_index = index;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool MissionBase::findAttachedPositionIndex(int32_t start_index, int32_t &attached_index)
+{
+	for (int32_t index = start_index; index >= 0; --index) {
+		mission_item_s mission_item{};
+
+		if (!loadMissionItemFromCache(index, mission_item)) {
+			return false;
+		}
+
+		if (item_contains_position(mission_item)) {
+			attached_index = index;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+uint8_t MissionBase::getVtolStateAtMissionIndex(int32_t anchor_index)
+{
+	for (int32_t index = anchor_index; index >= 0; --index) {
+		mission_item_s mission_item{};
+
+		if (!loadMissionItemFromCache(index, mission_item)) {
+			break;
+		}
+
+		if (mission_item.nav_cmd == NAV_CMD_DO_VTOL_TRANSITION) {
+			const int transition_mode = static_cast<int>(roundf(mission_item.params[0]));
+
+			if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC) {
+				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
+
+			} else if (transition_mode == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
+				return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW;
+			}
+		}
+	}
+
+	return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
+}
+
+MissionBase::VtolTransitionAction MissionBase::vtolTransitionActionForTarget(int32_t target_index,
+		bool direction_reversed)
+{
+	const auto &vehicle_status = _vehicle_status_sub.get();
+
+	if (!vehicle_status.is_vtol || target_index < 0 || target_index >= _mission.count) {
+		return VtolTransitionAction::None;
+	}
+
+	// Find the segment-end anchor for the target index.
+	int32_t anchor_search_start = direction_reversed ? target_index + 1 : target_index;
+
+	if (anchor_search_start >= _mission.count) {
+		return VtolTransitionAction::None;
+	}
+
+	int32_t segment_anchor_index = -1;
+
+	if (!findNextPositionIndexNoJump(anchor_search_start, segment_anchor_index)) {
+		return VtolTransitionAction::None;
+	}
+
+	const uint8_t target_segment_state = getVtolStateAtMissionIndex(segment_anchor_index);
+	const bool currently_fw = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
+				  || vehicle_status.in_transition_to_fw;
+
+	if (target_segment_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC && currently_fw) {
+		return VtolTransitionAction::BackTransition;
+	}
+
+	if (target_segment_state == vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW && !currently_fw) {
+		return VtolTransitionAction::FrontTransition;
+	}
+
+	return VtolTransitionAction::None;
 }
 
 void MissionBase::getPreviousPositionItems(int32_t start_index, int32_t items_index[],
