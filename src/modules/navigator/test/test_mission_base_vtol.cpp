@@ -208,12 +208,6 @@ static mission_item_s makeDoJump(int16_t jump_target_index, uint16_t repeat_coun
 // Test fixture
 // ============================================================================
 
-/**
- * Shared fixture: TestMissionBase is constructed once for the entire suite
- * to avoid the ~1 s DatamanClient timeout per test (the DatamanClient in
- * MissionBase::_dataman_cache tries to acquire a client ID from the dataman
- * server which is absent in the functional-test environment).
- */
 class MissionBaseVtolTest : public ::testing::Test
 {
 protected:
@@ -221,6 +215,13 @@ protected:
 
 	static void SetUpTestSuite()   { mission_base = new TestMissionBase(); }
 	static void TearDownTestSuite() { delete mission_base; mission_base = nullptr; }
+
+	void SetUp() override
+	{
+		// Reset state between tests to prevent leakage from previous runs.
+		mission_base->loadTestMission({});
+		mission_base->setVehicleStatus(false, false, false);
+	}
 
 	static constexpr double kLat = 47.397742;
 	static constexpr double kLon = 8.545594;
@@ -316,6 +317,12 @@ protected:
 	static void SetUpTestSuite()   { mission_base = new TestMissionBase(); }
 	static void TearDownTestSuite() { delete mission_base; mission_base = nullptr; }
 
+	void SetUp() override
+	{
+		mission_base->loadTestMission({});
+		mission_base->setVehicleStatus(false, false, false);
+	}
+
 	bool reversed() const { return GetParam(); }
 
 	static constexpr double kLat = 47.397742;
@@ -347,7 +354,8 @@ TEST_P(MissionBaseVtolDirectionTest, NonVtolAlwaysReturnsNone)
 
 INSTANTIATE_TEST_SUITE_P(Direction, MissionBaseVtolDirectionTest,
 			 ::testing::Values(false, true),
-			 [](const ::testing::TestParamInfo<bool> &param_info) {
+			 [](const ::testing::TestParamInfo<bool> &param_info)
+{
 	return param_info.param ? "Reverse" : "Forward";
 });
 

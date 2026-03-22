@@ -1196,61 +1196,37 @@ void MissionBase::getPreviousPositionItems(int32_t start_index, int32_t items_in
 		size_t &num_found_items, uint8_t max_num_items)
 {
 	num_found_items = 0u;
-
-	int32_t next_mission_index{start_index};
+	int32_t search_index = start_index;
 
 	for (size_t item_idx = 0u; item_idx < max_num_items; item_idx++) {
-		if (next_mission_index < 0) {
+		int32_t found_index = -1;
+
+		if (!findPreviousPositionIndexNoJump(search_index, found_index)) {
 			break;
 		}
 
-		mission_item_s next_mission_item;
-		bool found_next_item{false};
-
-		do {
-			next_mission_index--;
-			found_next_item = getNonJumpItem(next_mission_index, next_mission_item, true, false, true) == PX4_OK;
-		} while (!MissionBlock::item_contains_position(next_mission_item) && found_next_item);
-
-		if (found_next_item) {
-			items_index[item_idx] = next_mission_index;
-			num_found_items = item_idx + 1;
-
-		} else {
-			break;
-		}
+		items_index[item_idx] = found_index;
+		num_found_items = item_idx + 1;
+		search_index = found_index;
 	}
 }
 
 void MissionBase::getNextPositionItems(int32_t start_index, int32_t items_index[],
 				       size_t &num_found_items, uint8_t max_num_items)
 {
-	// Make sure vector does not contain any preexisting elements.
 	num_found_items = 0u;
-
-	int32_t next_mission_index{start_index};
+	int32_t search_index = start_index;
 
 	for (size_t item_idx = 0u; item_idx < max_num_items; item_idx++) {
-		if (next_mission_index >= _mission.count) {
+		int32_t found_index = -1;
+
+		if (!findNextPositionIndexNoJump(search_index, found_index)) {
 			break;
 		}
 
-		mission_item_s next_mission_item;
-		bool found_next_item{false};
-
-		do {
-			found_next_item = getNonJumpItem(next_mission_index, next_mission_item, true, false, false) == PX4_OK;
-			next_mission_index++;
-		} while (!MissionBlock::item_contains_position(next_mission_item) && found_next_item);
-
-		if (found_next_item) {
-			items_index[item_idx] = math::max(next_mission_index - 1,
-							  static_cast<int32_t>(0)); // subtract 1 to get the index of the first position item
-			num_found_items = item_idx + 1;
-
-		} else {
-			break;
-		}
+		items_index[item_idx] = found_index;
+		num_found_items = item_idx + 1;
+		search_index = found_index + 1;
 	}
 }
 
