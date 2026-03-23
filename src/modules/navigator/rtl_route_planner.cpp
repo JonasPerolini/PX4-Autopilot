@@ -109,18 +109,6 @@ const char *RtlRoutePlanner::goalTypeString(GoalType goal_type)
 	}
 }
 
-bool RtlRoutePlanner::itemContainsPosition(const mission_item_s &mission_item)
-{
-	return mission_item.nav_cmd == NAV_CMD_WAYPOINT
-	       || mission_item.nav_cmd == NAV_CMD_LOITER_UNLIMITED
-	       || mission_item.nav_cmd == NAV_CMD_LOITER_TIME_LIMIT
-	       || mission_item.nav_cmd == NAV_CMD_LAND
-	       || mission_item.nav_cmd == NAV_CMD_TAKEOFF
-	       || mission_item.nav_cmd == NAV_CMD_LOITER_TO_ALT
-	       || mission_item.nav_cmd == NAV_CMD_VTOL_TAKEOFF
-	       || mission_item.nav_cmd == NAV_CMD_VTOL_LAND;
-}
-
 float RtlRoutePlanner::getAbsoluteAltitudeForMissionItem(const mission_item_s &mission_item, float home_altitude_amsl)
 {
 	if (mission_item.altitude_is_relative && PX4_ISFINITE(home_altitude_amsl)) {
@@ -133,7 +121,7 @@ float RtlRoutePlanner::getAbsoluteAltitudeForMissionItem(const mission_item_s &m
 bool RtlRoutePlanner::extractMissionPosition(const mission_item_s &mission_item, float home_altitude_amsl,
 		Position &position)
 {
-	if (!itemContainsPosition(mission_item)) {
+	if (!MissionBlock::item_contains_position(mission_item)) {
 		return false;
 	}
 
@@ -219,7 +207,7 @@ bool RtlRoutePlanner::findAttachedValidPositionIndex(uint16_t start_index, float
 			return false;
 		}
 
-		if (itemContainsPosition(mission_item)) {
+		if (MissionBlock::item_contains_position(mission_item)) {
 			Position position{};
 
 			if (extractMissionPosition(mission_item, home_altitude_amsl, position)) {
@@ -318,7 +306,7 @@ bool RtlRoutePlanner::prepareNextSegment(uint16_t index, Segment &segment, Segme
 		segment.end.nav_cmd = mission_item.nav_cmd;
 	}
 
-	if (!itemContainsPosition(mission_item)) {
+	if (!MissionBlock::item_contains_position(mission_item)) {
 		return false;
 	}
 
@@ -1339,16 +1327,18 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectMissionEndpointFallback(const 
 		return selection;
 	}
 
-	uint16_t takeoff_index{0};
-	bool have_takeoff = findNextValidPositionIndex(0, config.home_altitude_amsl, takeoff_index);
-	uint16_t land_index{0};
-	bool have_land = findAttachedValidPositionIndex(static_cast<uint16_t>(_provider.missionCount() - 1),
-			 config.home_altitude_amsl, land_index);
+	int32_t takeoff_index{-1};
+	mission_item_s takeoff_item{};
+	bool have_takeoff = _provider.getMissionTakeoffItem(takeoff_index, takeoff_item);
+
+	int32_t land_index{-1};
+	mission_item_s land_item{};
+	bool have_land = _provider.getMissionLandItem(land_index, land_item);
 
 	Path path_to_takeoff{};
 	Position takeoff_position{};
 	const bool path_to_takeoff_valid = have_takeoff
-					   && readValidMissionPosition(takeoff_index, config.home_altitude_amsl, takeoff_position)
+					   && extractMissionPosition(takeoff_item, config.home_altitude_amsl, takeoff_position)
 					   && (path_to_takeoff = findShortestPath(takeoff_index, 0.f,
 							   projection_context, config,
 							   PathDirectionMode::ForceReverse)).valid();
@@ -1356,7 +1346,7 @@ RtlRoutePlanner::Selection RtlRoutePlanner::selectMissionEndpointFallback(const 
 	Path path_to_land{};
 	Position land_position{};
 	const bool path_to_land_valid = have_land
-					&& readValidMissionPosition(land_index, config.home_altitude_amsl, land_position)
+					&& extractMissionPosition(land_item, config.home_altitude_amsl, land_position)
 					&& (path_to_land = findShortestPath(land_index,
 							projection_context.dist_along_to_route_end,
 							projection_context, config,

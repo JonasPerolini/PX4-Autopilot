@@ -8,7 +8,7 @@ This mode is intended for operations where the mission itself is the safest know
 
 ::: info
 - If no [safety points (rally points)](../flying/plan_safety_points.md) can be selected, PX4 falls back to the closer mission endpoint (landing or takeoff) while staying in the route-based return logic.
-- Regardless of the direction of flight, the vehicle skips `DO_JUMP` commands.
+- Regardless of the direction of flight, the vehicle skips `DO_JUMP` commands. Note however that the route planner evaluates jump segments to accurately project the vehicle segment.
 - If the mission itself cannot be projected, PX4 falls back to a direct return (RTL_TYPE=0 behavior).
 :::
 

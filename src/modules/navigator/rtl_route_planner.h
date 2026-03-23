@@ -44,6 +44,7 @@
 #pragma once
 
 #include "navigation.h"
+#include "mission_block.h"
 
 #include <float.h>
 #include <math.h>
@@ -317,6 +318,39 @@ public:
 		virtual bool loadMissionItem(int index, mission_item_s &mission_item) const = 0;
 		virtual int safePointCount() const = 0;
 		virtual bool loadSafePointItem(int index, mission_item_s &safe_point_item) const = 0;
+
+		/** @brief Find the mission land item. Default scans backward for NAV_CMD_LAND / NAV_CMD_VTOL_LAND. */
+		virtual bool getMissionLandItem(int32_t &index, mission_item_s &land_item) const
+		{
+			for (int i = missionCount() - 1; i >= 0; --i) {
+				mission_item_s item{};
+
+				if (loadMissionItem(i, item)
+				    && (item.nav_cmd == NAV_CMD_LAND || item.nav_cmd == NAV_CMD_VTOL_LAND)) {
+					index = i;
+					land_item = item;
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		/** @brief Find the mission takeoff item. Default checks index 0 for NAV_CMD_TAKEOFF / NAV_CMD_VTOL_TAKEOFF. */
+		virtual bool getMissionTakeoffItem(int32_t &index, mission_item_s &takeoff_item) const
+		{
+			// Assume that the mission starts with a takeoff item, only check index 0
+			mission_item_s item{};
+
+			if (missionCount() > 0 && loadMissionItem(0, item)
+			    && (item.nav_cmd == NAV_CMD_TAKEOFF || item.nav_cmd == NAV_CMD_VTOL_TAKEOFF)) {
+				index = 0;
+				takeoff_item = item;
+				return true;
+			}
+
+			return false;
+		}
 	};
 
 	explicit RtlRoutePlanner(const Provider &provider) : _provider(provider) {}
@@ -337,7 +371,6 @@ public:
 	bool closeToBranchOffSegment(const Position &position, const Selection &selection,
 				     float acceptance_radius) const;
 
-	static bool itemContainsPosition(const mission_item_s &mission_item);
 	static float getAbsoluteAltitudeForMissionItem(const mission_item_s &mission_item, float home_altitude_amsl);
 	static bool extractMissionPosition(const mission_item_s &mission_item, float home_altitude_amsl,
 					   Position &position);

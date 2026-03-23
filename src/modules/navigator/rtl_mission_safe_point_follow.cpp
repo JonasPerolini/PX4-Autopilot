@@ -44,6 +44,7 @@
 #include "rtl_mission_safe_point_follow.h"
 #include "navigator.h"
 
+#include <dataman_client/DatamanClient.hpp>
 #include <drivers/drv_hrt.h>
 
 static constexpr int32_t DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE = 5;
@@ -58,10 +59,21 @@ bool isLandingCommand(const mission_item_s &mission_item)
 
 } // namespace
 
-RtlMissionSafePointFollow::RtlMissionSafePointFollow(Navigator *navigator, mission_s mission) :
-	RtlBase(navigator, DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE)
+RtlMissionSafePointFollow::RtlMissionSafePointFollow(Navigator *navigator, mission_s mission,
+		DatamanCache &full_mission_cache) :
+	RtlBase(navigator, DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE),
+	_full_mission_cache(full_mission_cache)
 {
 	_mission = mission;
+}
+
+bool RtlMissionSafePointFollow::loadMissionItemFromCache(int32_t index, mission_item_s &mission_item)
+{
+	return index >= 0
+	       && index < _mission.count
+	       && _full_mission_cache.loadWait(static_cast<dm_item_t>(_mission.mission_dataman_id), index,
+					       reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
+					       MAX_DATAMAN_LOAD_WAIT);
 }
 
 void RtlMissionSafePointFollow::setRoutePlan(const RtlRoutePlanner::Plan &plan)

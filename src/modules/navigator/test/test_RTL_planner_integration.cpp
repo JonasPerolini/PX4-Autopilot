@@ -483,66 +483,8 @@ TEST_F(RtlPlannerIntegrationTest, PlanRouteNearTakeoffWithSafePointDoesNotFallba
 }
 
 // =============================================================================
-// GROUP 6: FaultyVectorProvider — graceful degradation on load failures
+// GROUP 6: Graceful degradation on load failures (using VectorProvider fault injection)
 // =============================================================================
-
-/** @brief Provider that simulates SD card / dataman read failures on selected indices. */
-class FaultyVectorProvider : public RtlRoutePlanner::Provider
-{
-public:
-	FaultyVectorProvider(std::vector<mission_item_s> mission_items,
-			     std::vector<mission_item_s> safe_point_items,
-			     std::vector<int> faulty_mission_indices = {},
-			     std::vector<int> faulty_safe_point_indices = {}) :
-		_mission_items(std::move(mission_items)),
-		_safe_point_items(std::move(safe_point_items)),
-		_faulty_mission_indices(std::move(faulty_mission_indices)),
-		_faulty_safe_point_indices(std::move(faulty_safe_point_indices))
-	{
-	}
-
-	int missionCount() const override { return static_cast<int>(_mission_items.size()); }
-
-	bool loadMissionItem(int index, mission_item_s &mission_item) const override
-	{
-		for (int fi : _faulty_mission_indices) {
-			if (fi == index) {
-				return false;
-			}
-		}
-
-		if (index < 0 || index >= missionCount()) {
-			return false;
-		}
-
-		mission_item = _mission_items[index];
-		return true;
-	}
-
-	int safePointCount() const override { return static_cast<int>(_safe_point_items.size()); }
-
-	bool loadSafePointItem(int index, mission_item_s &safe_point_item) const override
-	{
-		for (int fi : _faulty_safe_point_indices) {
-			if (fi == index) {
-				return false;
-			}
-		}
-
-		if (index < 0 || index >= safePointCount()) {
-			return false;
-		}
-
-		safe_point_item = _safe_point_items[index];
-		return true;
-	}
-
-private:
-	std::vector<mission_item_s> _mission_items;
-	std::vector<mission_item_s> _safe_point_items;
-	std::vector<int> _faulty_mission_indices;
-	std::vector<int> _faulty_safe_point_indices;
-};
 
 // WHY: If the SD card fails to read a mission item mid-scan, the planner must not crash
 //      or produce an invalid plan. It should either fail gracefully with a clear reason
@@ -559,7 +501,7 @@ TEST_F(RtlPlannerIntegrationTest, FaultyMissionItemMidScanCausesGracefulFailure)
 		makeLandItemFromOffset(kBaseLat, kBaseLon, 800.f, 0.f, kAlt - 10.f),
 	};
 
-	FaultyVectorProvider provider(mission, {}, {2}, {});
+	VectorProvider provider(mission, {}, {2}, {});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt + 15.f);
@@ -586,7 +528,7 @@ TEST_F(RtlPlannerIntegrationTest, AllInitialPositionItemsFaultyFailsGracefully)
 		makeLandItemFromOffset(kBaseLat, kBaseLon, 400.f, 0.f, kAlt - 10.f),
 	};
 
-	FaultyVectorProvider provider(mission, {}, {0, 1}, {});
+	VectorProvider provider(mission, {}, {0, 1}, {});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt + 10.f);
@@ -615,7 +557,7 @@ TEST_F(RtlPlannerIntegrationTest, AllFaultySafePointsFallBackToEndpoint)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 750.f, -50.f, kAlt + 20.f),
 	};
 
-	FaultyVectorProvider provider(mission, safe_points, {}, {0, 1});
+	VectorProvider provider(mission, safe_points, {}, {0, 1});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 25.f);
@@ -651,7 +593,7 @@ TEST_F(RtlPlannerIntegrationTest, OneFaultySafePointDoesNotBlockOthers)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 1250.f, 20.f, kAlt + 60.f),
 	};
 
-	FaultyVectorProvider provider(mission, safe_points, {}, {1});
+	VectorProvider provider(mission, safe_points, {}, {1});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 25.f);
@@ -680,7 +622,7 @@ TEST_F(RtlPlannerIntegrationTest, FaultyLandItemDoesNotCrash)
 		makeLandItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt - 10.f),
 	};
 
-	FaultyVectorProvider provider(mission, {}, {3}, {});
+	VectorProvider provider(mission, {}, {3}, {});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 20.f);
@@ -704,7 +646,7 @@ TEST_F(RtlPlannerIntegrationTest, FaultyLandItemDoesNotCrash)
 // WHAT: Provider with zero mission items causes planRouteToGoal to fail with NoValidWaypoints.
 TEST_F(RtlPlannerIntegrationTest, FaultyEmptyMissionRejectedImmediately)
 {
-	FaultyVectorProvider provider({}, {}, {}, {});
+	VectorProvider provider({}, {}, {}, {});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt);
@@ -725,7 +667,7 @@ TEST_F(RtlPlannerIntegrationTest, FaultySingleItemMissionCannotBuildSegments)
 		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
 	};
 
-	FaultyVectorProvider provider(mission, {}, {}, {});
+	VectorProvider provider(mission, {}, {}, {});
 	RtlRoutePlanner planner(provider);
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
@@ -932,6 +874,35 @@ TEST_F(RtlPlannerIntegrationTest, EndpointFallbackPlanHasValidGoalPosition)
 
 	EXPECT_GE(plan.selection.path.first_item_index, 0);
 	EXPECT_LT(plan.selection.path.first_item_index, static_cast<int32_t>(mission.size()));
+}
+
+// WHY: If the mission only contains NAV_CMD_WAYPOINT items (no actual takeoff/land commands),
+//      the endpoint fallback must NOT label a random waypoint as MissionTakeoff or MissionLand.
+//      Doing so would cause the executor to land at the wrong altitude (CFIT risk).
+// WHAT: planRouteToGoal fails when the mission has no takeoff or land items and no safe points.
+TEST_F(RtlPlannerIntegrationTest, WaypointOnlyMissionRejectsEndpointFallback)
+{
+	// GIVEN: A mission with only NAV_CMD_WAYPOINT items (no takeoff/land).
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt + 50.f),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt + 100.f),
+	};
+	std::vector<mission_item_s> no_safe_points{};
+	VectorProvider provider(items, no_safe_points);
+	RtlRoutePlanner planner(provider);
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 25.f);
+	config = defaultConfig();
+
+	// WHEN: planRouteToGoal is called.
+	bool ok = planner.planRouteToGoal(vehicle_pos, 1, config, plan, &reason);
+
+	// THEN: Planning must not produce a MissionTakeoff or MissionLand from plain waypoints.
+	if (ok) {
+		EXPECT_NE(plan.selection.goal_type, RtlRoutePlanner::GoalType::MissionTakeoff);
+		EXPECT_NE(plan.selection.goal_type, RtlRoutePlanner::GoalType::MissionLand);
+	}
 }
 
 // WHY: The executor's closeToBranchOffSegment() is used to decide whether to go straight

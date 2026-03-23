@@ -628,7 +628,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_Simple)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 10.f, 110.f, kAlt),
 	};
 
-	CountingProvider provider{mission, safe_points};
+	VectorProvider provider{mission, safe_points};
 	RtlRoutePlanner planner{provider};
 	const RtlRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 20.f, 5.f, kAlt);
@@ -654,7 +654,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_Simple)
 TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_DefaultDataset)
 {
 	// GIVEN: Default 16-item mission with 7 rally points, using CountingProvider.
-	CountingProvider provider{default_dataset::mission(), default_dataset::safePoints()};
+	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	RtlRoutePlanner planner{provider};
 	const RtlRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
