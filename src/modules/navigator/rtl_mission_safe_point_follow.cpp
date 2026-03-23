@@ -141,17 +141,7 @@ void RtlMissionSafePointFollow::on_activation()
 	_navigator->get_position_setpoint_triplet()->current.valid = false;
 	_navigator->get_position_setpoint_triplet()->next.valid = false;
 
-	// Intentionally bypass MissionBase::on_activation() to avoid calling
-	// updateCachedItemsUpToIndex() which synchronously reads every mission item
-	// up to current_seq from the SD card.  For high mission indices this blocks
-	// the flight controller CPU for an unacceptable duration.  SRP does not need
-	// camera/gimbal state replay — it treats the mission as geometry only.
-	_mission_has_been_activated = true;
-	_system_disarmed_while_inactive = false;
-	_inactivation_index = -1;
-	_mission_activation_index = _mission.current_seq;
-	_navigator->reset_cruising_speed();
-	set_mission_items();
+	MissionBase::on_activation();
 }
 
 bool RtlMissionSafePointFollow::advanceRouteTarget()

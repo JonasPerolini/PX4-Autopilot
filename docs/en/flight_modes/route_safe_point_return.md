@@ -213,7 +213,7 @@ RTL::setRtlTypeAndDestination()
   │    ├─ selectSafePoint()             → Selection
   │    └─ choosePath()                  → Path + JoinContext
   │
-  ├─ Plan { projection_context, selection, join_context }
+  ├─ Plan {projection_context, selection, join_context}
   │
   └─ RtlMissionSafePointFollow::setRoutePlan(plan)
        └─ Executor stage machine drives setpoints
@@ -265,6 +265,43 @@ The executor reuses several traversal methods from `MissionBase` to avoid code d
 - `findNextPositionIndexNoJump()` / `findPreviousPositionIndexNoJump()`: walk forward/backward skipping non-position and `DO_JUMP` items. `findPreviousPositionIndexNoJump()` returns `false` on dataman load failure instead of silently skipping, ensuring SD card read errors are surfaced to the caller.
 - `findAttachedPositionIndex()`: find the nearest position item at or before a given index.
 - `vtolTransitionActionForTarget()`: determine if a VTOL transition is needed for a given target index.
+
+### Dataman Cache Architecture
+
+PX4 missions can contain thousands of items, which heavily exceeds the RAM limits of typical flight controller microcontrollers. To solve this, PX4 stores missions on the SD Card or FRAM using the Dataman service.
+
+Because reading from an SD card is slow and blocking, Navigator modes use `DatamanCache` as a RAM buffer. However, the Route Safe Point Return mode requires a different caching strategy than standard mission execution.
+
+#### The Sequential Sliding Window (MissionBase)
+
+Standard mission execution (Takeoff, Mission, direct RTL) only flies from waypoint A to waypoint B. It does not need the entire mission in RAM. `MissionBase` implements a sliding-window cache (typically 5 items). As the drone flies, it asynchronously fetches the next few waypoints. This keeps RAM usage low.
+
+#### The Random-Access Route Cache (RTL Orchestrator)
+
+Route Safe Point Return (`RTL_TYPE=6`) must perform complex geometric projections. To find the safest branch-off point, `RtlRoutePlanner` must rapidly scan every segment of the mission against every safe point. Doing this with a 5-item sliding window would trigger thousands of synchronous SD card reads, completely locking up the flight controller.
+
+To solve this, the RTL orchestrator pre-loads the entire mission (up to `CONFIG_RTL_MISSION_CACHE_SIZE`, default 300) into a dedicated large RAM cache when the mode activates.
+
+```
+Mission on SD Card:  [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ][ 5 ][ 6 ][ 7 ]...[ 299 ]
+                       │    │    │    │    │    │    │    │        │
+                       ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼        ▼
+RAM Cache (300):     [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ][ 5 ][ 6 ][ 7 ]...[ 299 ]
+                       ▲                                           ▲
+                       └─── entire mission loaded on activation ───┘
+                            instant random access by any index
+```
+
+#### The Bridge (loadMissionItemFromCache Override)
+
+`MissionBase` provides internal methods (`getNonJumpItem()`, `checkClimbRequired()`, `setMissionToClosestItem()`, etc.) that need to load mission items by index. All of these call the virtual method `loadMissionItemFromCache()` rather than accessing the cache directly.
+
+This design allows each subclass to supply its own storage backend through a single override.
+
+- **Standard Mission mode** calls the base `MissionBase::loadMissionItemFromCache()`, which safely uses the 5-item sliding window.
+- **RtlMissionSafePointFollow** overrides `loadMissionItemFromCache()` to pull instantly from the RTL orchestrator's large pre-loaded cache.
+
+This means the same traversal code in `MissionBase` works correctly for both modes without any code duplication or mode-specific branching.
 
 ## Related Topics
 
