@@ -34,7 +34,7 @@
 /**
  * @file test_RTL_data.h
  *
- * Reusable mission and safe-point datasets for RtlRoutePlanner tests.
+ * Reusable mission and safe-point datasets for MissionRoutePlanner tests.
  *
  * default_dataset: 16-item mission with VTOL transitions and 7 rally points.
  *   The route doubles back on itself (segments 7-9 and 11-12 run roughly

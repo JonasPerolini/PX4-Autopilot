@@ -52,7 +52,7 @@
 #include "rtl_mission_fast.h"
 #include "rtl_mission_fast_reverse.h"
 #include "rtl_mission_safe_point_follow.h"
-#include "rtl_route_planner.h"
+#include "mission_route_planner.h"
 
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
@@ -91,8 +91,6 @@ public:
 	void initialize() override {};
 
 	void set_return_alt_min(bool min) { _enforce_rtl_alt = min; }
-
-	void updateSafePoints(uint32_t new_safe_point_id) { _initiate_safe_points_updated = true; _safe_points_id = new_safe_point_id; }
 
 	bool isLanding();
 
@@ -212,14 +210,6 @@ private:
 	 */
 	loiter_point_s chooseBestLandingApproach(const land_approaches_s &vtol_land_approaches);
 
-	enum class DatamanState {
-		UpdateRequestWait,
-		Read,
-		ReadWait,
-		Load,
-		Error
-	};
-
 	hrt_abstime _destination_check_time{0};
 
 	RtlBase *_rtl_mission_type_handle{nullptr};
@@ -228,36 +218,16 @@ private:
 	bool _home_has_land_approach;			///< Flag if the home position has a land approach defined
 	bool _one_rally_point_has_land_approach;	///< Flag if a rally point has a land approach defined
 
-	DatamanState _dataman_state{DatamanState::UpdateRequestWait};
-	DatamanState _error_state{DatamanState::UpdateRequestWait};
-	uint32_t _opaque_id{0}; ///< dataman safepoint id: if it does not match, safe points data was updated
-	bool _safe_points_updated{false}; ///< flag indicating if safe points are updated to dataman cache
-	mutable DatamanCache _dataman_cache_safepoint{"rtl_dm_cache_miss_geo", 4};
-	DatamanClient	&_dataman_client_safepoint = _dataman_cache_safepoint.client();
-	bool _initiate_safe_points_updated{true}; ///< flag indicating if safe points update is needed
-	mutable DatamanCache _dataman_cache_landItem{"rtl_dm_cache_miss_land", 2};
-
-	/**
-	 * Maximum number of mission items that can be cached for route-based RTL.
-	 * Board-configurable via CONFIG_RTL_MISSION_CACHE_SIZE (Kconfig), default 300.
-	 * Missions exceeding this size fall back to a direct RTL type.
-	 */
-	static constexpr int32_t MAX_RTL_MISSION_CACHE_SIZE = CONFIG_RTL_MISSION_CACHE_SIZE;
-
-	mutable DatamanCache _dataman_cache_mission{"rtl_dm_cache_miss_mission", 0}; ///< pre-loaded mission items for non-blocking route planning
-	bool _mission_items_updated{false}; ///< flag indicating if all mission items are loaded into cache
-	uint32_t _mission_id = 0u;
-	uint32_t _safe_points_id = 0u;
+	uint32_t _route_plan_mission_id{0};
+	uint32_t _route_plan_safe_points_id{0};
 	PositionYawSetpoint _last_position_before_link_loss{(double)NAN, (double)NAN, NAN, NAN};
-
-	mission_stats_entry_s _stats;
 
 	RtlDirect _rtl_direct;
 
 	bool _enforce_rtl_alt{false};
 	bool _should_go_straight_to_safe_point{false};
-	RtlRoutePlanner::Plan _route_safe_point_plan{};
-	RtlRoutePlanner::Segment _last_route_safe_point_loop_segment{};
+	MissionRoutePlanner::Plan _route_safe_point_plan{};
+	MissionRoutePlanner::Segment _last_route_safe_point_loop_segment{};
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::RTL_TYPE>)          _param_rtl_type,
@@ -266,8 +236,8 @@ private:
 		(ParamFloat<px4::params::RTL_MIN_DIST>)    _param_rtl_min_dist,
 		(ParamFloat<px4::params::NAV_ACC_RAD>)     _param_nav_acc_rad,
 		(ParamInt<px4::params::RTL_APPR_FORCE>)    _param_rtl_appr_force,
-		(ParamFloat<px4::params::RTL_MC_SEG_DIST>) _param_rtl_mc_seg_dist,
-		(ParamFloat<px4::params::RTL_FW_SEG_DIST>) _param_rtl_fw_seg_dist,
+		(ParamFloat<px4::params::MIS_MC_SEG_DIST>) _param_mis_mc_seg_dist,
+		(ParamFloat<px4::params::MIS_FW_SEG_DIST>) _param_mis_fw_seg_dist,
 		(ParamFloat<px4::params::RTL_RP_SEG_DIST>) _param_rtl_rp_seg_dist,
 		(ParamFloat<px4::params::RTL_FW_UTURN_PEN>) _param_rtl_fw_uturn_pen
 	)

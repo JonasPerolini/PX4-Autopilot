@@ -46,13 +46,11 @@
 #include "rtl_base.h"
 #include <lib/rtl/rtl_time_estimator.h>
 
-class DatamanCache;
-
 class RtlMissionSafePointFollow : public RtlBase
 {
 public:
 	/** @brief Execute the staged Route Safe Point Return plan built by RTL type 6. */
-	RtlMissionSafePointFollow(Navigator *navigator, mission_s mission, DatamanCache &full_mission_cache);
+	RtlMissionSafePointFollow(Navigator *navigator, mission_s mission);
 	~RtlMissionSafePointFollow() = default;
 
 	void on_inactivation() override;
@@ -60,15 +58,13 @@ public:
 
 	bool isLanding() override { return _stage == Stage::LandAtGoal; }
 	bool shouldGoStraightToGoal() const override { return _should_go_straight_to_goal; }
-	RtlRoutePlanner::Segment lastFlownLoopSegment() const override { return _last_flown_loop_segment; }
+	MissionRoutePlanner::Segment lastFlownLoopSegment() const override { return _last_flown_loop_segment; }
 	rtl_time_estimate_s calc_rtl_time_estimate() override;
-	void setRoutePlan(const RtlRoutePlanner::Plan &plan) override;
+	void setRoutePlan(const MissionRoutePlanner::Plan &plan) override;
 
 private:
 	enum class Stage {
 		Idle = 0,                /**< No active SRP plan. */
-		JoinRoute,               /**< Fly the virtual join waypoint at the vehicle projection. */
-		TransitionAfterJoin,     /**< Apply a required VTOL back-transition before following the route. */
 		FollowRoute,             /**< Follow the mission geometry in nominal or reverse direction. */
 		TransitionDuringRoute,   /**< Apply a VTOL transition during route following (prevents re-issuing). */
 		BranchOff,               /**< Fly the virtual branch-off waypoint before leaving the route. */
@@ -81,7 +77,7 @@ private:
 	void setActiveMissionItems() override;
 
 	/** @brief Build a virtual waypoint used for joins, branch-offs, and synthetic move-to-point legs. */
-	void setWaypointMissionItem(mission_item_s &mission_item, const RtlRoutePlanner::Position &position,
+	void setWaypointMissionItem(mission_item_s &mission_item, const MissionRoutePlanner::Position &position,
 				    bool autocontinue, bool vtol_back_transition_required = false) const;
 	/** @brief Build the synthetic SRP landing item for safe-point landings and reverse takeoff fallback. */
 	void setLandMissionItem(mission_item_s &mission_item) const;
@@ -111,13 +107,11 @@ private:
 
 	bool loadMissionItemFromCache(int32_t index, mission_item_s &mission_item) override;
 
-	RtlRoutePlanner::Plan _plan{};
+	MissionRoutePlanner::Plan _plan{};
 	Stage _stage{Stage::Idle};
 	int32_t _branch_off_index{-1};
 	bool _should_go_straight_to_goal{false};
-	bool _join_requires_back_transition{false}; /**< Whether the join requires a VTOL back-transition (computed by executor). */
-	RtlRoutePlanner::Segment _last_flown_loop_segment{};
+	MissionRoutePlanner::Segment _last_flown_loop_segment{};
 	int32_t _transition_target_index{-1}; /**< Mission index that triggered the current in-flight transition. */
 	RtlTimeEstimator _rtl_time_estimator; /**< Time estimator consistent with other RTL modes. */
-	DatamanCache &_full_mission_cache; /**< Pre-loaded mission cache from RTL, avoids SD card I/O. */
 };

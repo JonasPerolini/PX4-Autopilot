@@ -41,7 +41,7 @@
  *   - findPreviousPositionIndexNoJump()
  *
  * These tests verify the centralized transition logic that was previously
- * duplicated in RtlRoutePlanner. The executor (RtlMissionSafePointFollow)
+ * duplicated in MissionRoutePlanner. The executor (RtlMissionSafePointFollow)
  * now calls these MissionBase methods directly instead of going through
  * the planner.
  *
@@ -147,6 +147,12 @@ public:
 	using MissionBase::VtolTransitionAction;
 	using MissionBase::findNextPositionIndexNoJump;
 	using MissionBase::findPreviousPositionIndexNoJump;
+	using MissionBase::updateLastFlownLoopSegmentForNominalAdvance;
+
+	void setCurrentSequence(int32_t index)
+	{
+		_mission.current_seq = index;
+	}
 
 private:
 	std::vector<mission_item_s> _items;
@@ -665,4 +671,63 @@ TEST_F(MissionBaseVtolTest, FindPreviousReturnsFalseWhenOnlyJumpsBefore)
 
 	int32_t prev = -1;
 	EXPECT_FALSE(mission_base->findPreviousPositionIndexNoJump(1, prev));
+}
+
+// WHY: Projection-based replans must remember which active DO_JUMP edge the vehicle was flying
+//      before advancing, otherwise rejoin logic near loops can snap to the wrong segment.
+// WHAT: [WP0, WP1, WP2, DO_JUMP->0 repeat=3 current=1, WP3] at current_seq=2 tracks loop edge 2->0.
+TEST_F(MissionBaseVtolTest, TracksActiveLoopSegmentBeforeNominalAdvance)
+{
+	std::vector<mission_item_s> items = {
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+		makePositionItem(kLat + 0.002, kLon, kAlt),
+		makeDoJump(0, 3, 1),
+		makePositionItem(kLat + 0.003, kLon, kAlt),
+	};
+
+	mission_base->loadTestMission(items);
+	mission_base->setCurrentSequence(2);
+
+	MissionRoutePlanner::Segment segment{};
+	mission_base->updateLastFlownLoopSegmentForNominalAdvance(segment);
+
+	EXPECT_TRUE(segment.valid());
+	EXPECT_TRUE(segment.is_loop);
+	EXPECT_EQ(segment.start.idx, 2);
+	EXPECT_EQ(segment.start.nav_cmd, NAV_CMD_WAYPOINT);
+	EXPECT_EQ(segment.end.idx, 0);
+	EXPECT_EQ(segment.end.nav_cmd, NAV_CMD_WAYPOINT);
+	EXPECT_EQ(segment.loops_remaining, 2);
+}
+
+// WHY: When there is no active loop ahead, the cached loop edge must be cleared so later replans
+//      do not keep biasing candidate selection toward a stale jump segment.
+// WHAT: Plain waypoint mission leaves the returned segment invalid.
+TEST_F(MissionBaseVtolTest, ClearsLoopSegmentWhenNoActiveJumpAhead)
+{
+	std::vector<mission_item_s> items = {
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+		makePositionItem(kLat + 0.002, kLon, kAlt),
+	};
+
+	mission_base->loadTestMission(items);
+	mission_base->setCurrentSequence(1);
+
+	MissionRoutePlanner::Segment segment{};
+	segment.start.idx = 7;
+	segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	segment.end.idx = 2;
+	segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	segment.is_loop = true;
+	segment.loops_remaining = 5;
+
+	mission_base->updateLastFlownLoopSegmentForNominalAdvance(segment);
+
+	EXPECT_FALSE(segment.valid());
+	EXPECT_FALSE(segment.is_loop);
+	EXPECT_EQ(segment.start.idx, -1);
+	EXPECT_EQ(segment.end.idx, -1);
+	EXPECT_EQ(segment.loops_remaining, 0);
 }

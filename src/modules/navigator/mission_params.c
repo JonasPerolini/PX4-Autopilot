@@ -162,3 +162,51 @@ PARAM_DEFINE_INT32(MIS_LND_ABRT_ALT, 30);
  * @group Mission
  */
 PARAM_DEFINE_FLOAT(MIS_COMMAND_TOUT, 0.f);
+
+/**
+ * Enable smart mission-route rejoin on Mission activation
+ *
+ * If enabled and the vehicle is off the uploaded route when Mission mode is
+ * activated, Navigator projects the vehicle back onto the planned mission
+ * geometry and inserts a temporary branch-in waypoint before resuming the
+ * mission. If disabled, Mission mode falls back to the legacy behavior and
+ * flies directly to the current mission item.
+ *
+ * @boolean
+ * @value 0 Disabled
+ * @value 1 Enabled
+ * @group Mission
+ */
+PARAM_DEFINE_INT32(MIS_ROUTE_JOIN, 1);
+
+/**
+ * Extra cross-track search distance for multicopter mission-route projections
+ *
+ * When projecting the vehicle position onto the uploaded mission route for Mission resume or RTL_TYPE = 6.
+ * A projection point is only considered a valid candidate if the crosstrack distance
+ * from the vehicle to the segment does not not exceed the crosstrack distance
+ * from the vehicle to the closest available segment plus the allowed margin: MIS_MC_SEG_DIST.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Mission
+ */
+PARAM_DEFINE_FLOAT(MIS_MC_SEG_DIST, 30.f);
+
+/**
+ * Extra cross-track search distance for fixed-wing mission-route projections
+ *
+ * When projecting the vehicle position onto the uploaded mission route for Mission resume or RTL_TYPE = 6.
+ * A projection point is only considered a valid candidate if the crosstrack distance
+ * from the vehicle to the segment does not not exceed the crosstrack distance
+ * from the vehicle to the closest available segment plus the allowed margin: MIS_FW_SEG_DIST.
+ *
+ * @unit m
+ * @min 0
+ * @decimal 1
+ * @increment 1
+ * @group Mission
+ */
+PARAM_DEFINE_FLOAT(MIS_FW_SEG_DIST, 150.f);

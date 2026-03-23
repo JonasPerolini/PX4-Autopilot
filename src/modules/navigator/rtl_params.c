@@ -114,10 +114,10 @@ PARAM_DEFINE_FLOAT(RTL_MIN_DIST, 10.0f);
  * @value 3 Return via direct path to closest destination: home, start of mission landing pattern or safe point. If the destination is a mission landing pattern, follow the pattern to land.
  * @value 4 Return to the planned mission landing, or to home via the reverse mission path, whichever is closer by counting waypoints. Do not consider rally points.
  * @value 5 Return directly to safe landing point (do not consider mission landing and Home)
- * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Falls back to the closest mission endpoint (landing or takeoff) when no safe point is available. Requires the mission to fit within the board-configured cache (RTL_MISSION_CACHE_SIZE, default 300 items); larger missions fall back to direct RTL (type 3 behavior). Uses RTL_MC_SEG_DIST, RTL_FW_SEG_DIST, RTL_RP_SEG_DIST for projection search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
+ * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Falls back to the closest mission endpoint (landing or takeoff) when no safe point is available. Requires the mission to fit within the board-configured cache (RTL_MISSION_CACHE_SIZE, default 300 items); larger missions fall back to direct RTL (type 3 behavior). Uses MIS_MC_SEG_DIST, MIS_FW_SEG_DIST, RTL_RP_SEG_DIST for vehicle projection search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
  * @group Return Mode
  */
-PARAM_DEFINE_INT32(RTL_TYPE, 0);
+PARAM_DEFINE_INT32(RTL_TYPE, 6);
 
 /**
  * Half-angle of the return mode altitude cone
@@ -202,38 +202,6 @@ PARAM_DEFINE_INT32(RTL_TIME_MARGIN, 100);
  * @group Return To Land
  */
 PARAM_DEFINE_INT32(RTL_APPR_FORCE, 0);
-
-/**
- * Extra cross-track search distance for multicopter route projections
- *
- * When projecting the vehicle position onto the uploaded mission route (RTL_TYPE = 6).
- * A projection point is only considered a valid candidate if the crosstrack distance
- * from the vehicle to the segment does not not exceed the crosstrack distance
- * from the vehicle to the closest available segment plus the allowed margin: RTL_MC_SEG_DIST.
- *
- * @unit m
- * @min 0
- * @decimal 1
- * @increment 1
- * @group Return Mode
- */
-PARAM_DEFINE_FLOAT(RTL_MC_SEG_DIST, 30.f);
-
-/**
- * Extra cross-track search distance for fixed-wing route projections
- *
- * When projecting the vehicle position onto the uploaded mission route (RTL_TYPE = 6).
- * A projection point is only considered a valid candidate if the crosstrack distance
- * from the vehicle to the segment does not not exceed the crosstrack distance
- * from the vehicle to the closest available segment plus the allowed margin: RTL_FW_SEG_DIST.
- *
- * @unit m
- * @min 0
- * @decimal 1
- * @increment 1
- * @group Return Mode
- */
-PARAM_DEFINE_FLOAT(RTL_FW_SEG_DIST, 150.f);
 
 /**
  * Extra cross-track search distance for safe-point route projections

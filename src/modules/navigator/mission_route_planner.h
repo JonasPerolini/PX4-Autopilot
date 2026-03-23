@@ -32,7 +32,7 @@
  ****************************************************************************/
 
 /**
- * @file rtl_route_planner.h
+ * @file mission_route_planner.h
  *
  * Route planner for safe-point RTL (RTL_TYPE = 6).  Projects the vehicle
  * and every safe point onto the uploaded mission geometry, then selects
@@ -53,7 +53,7 @@
 #include <matrix/math.hpp>
 #include <px4_platform_common/defines.h>
 
-class RtlRoutePlanner
+class MissionRoutePlanner
 {
 public:
 	static constexpr float kRoundingToleranceM{0.1f};
@@ -305,9 +305,10 @@ public:
 	/**
 	 * @brief Abstraction for mission and safe-point data access.
 	 *
-	 * Production code uses the RtlRoutePlannerProvider in rtl.cpp (reads from dataman).
-	 * Unit tests supply a VectorProvider backed by std::vector, which keeps the planner
-	 * testable without any dataman or uORB dependencies.
+	 * Production code uses MissionRouteCache as the provider and dataman abstraction
+	 * for mission geometry, safe points, and mission-land items. Unit tests supply a
+	 * VectorProvider backed by std::vector, which keeps the planner testable without
+	 * any dataman or uORB dependencies.
 	 */
 	class Provider
 	{
@@ -353,7 +354,7 @@ public:
 		}
 	};
 
-	explicit RtlRoutePlanner(const Provider &provider) : _provider(provider) {}
+	explicit MissionRoutePlanner(const Provider &provider) : _provider(provider) {}
 
 	/** @brief Project the vehicle onto the mission route and choose the continuity-preserving branch-in candidate. */
 	bool collectVehicleProjection(const Position &vehicle_position, int32_t mission_index,

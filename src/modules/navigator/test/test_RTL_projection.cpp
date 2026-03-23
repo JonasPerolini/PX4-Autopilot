@@ -34,7 +34,7 @@
 /**
  * @file test_RTL_projection.cpp
  *
- * Google Test suite for RtlRoutePlanner vehicle projection and
+ * Google Test suite for MissionRoutePlanner vehicle projection and
  * candidate detection behavior. Tests how the vehicle projects onto
  * the mission route and how projection candidates are detected.
  *
@@ -52,7 +52,7 @@ static constexpr float  kAlt     = 500.f;
 // Test fixture
 // ============================================================================
 
-class RtlProjectionTest : public RtlRoutePlannerTestBase {};
+class RtlProjectionTest : public MissionRoutePlannerTestBase {};
 
 // ============================================================================
 // GROUP 1: Vehicle projection onto current/nearby segment
@@ -69,9 +69,9 @@ TEST_F(RtlProjectionTest, PrefersCurrentMissionSegment)
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
 	};
 	VectorProvider provider(mission, {});
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 90.f, 10.f, kAlt);
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 90.f, 10.f, kAlt);
 
 	// WHEN: project with mission_index=1
 	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
@@ -86,7 +86,7 @@ TEST_F(RtlProjectionTest, PrefersCurrentMissionSegment)
 // WHY: A negative or out-of-range mission index should be clamped rather than causing undefined behavior.
 // WHAT: Pass various out-of-range indices, verify they all produce the same result as index 0.
 // NOTE: Uses TEST_P to independently test each invalid index value.
-class RtlProjectionClampTest : public RtlRoutePlannerTestBase, public ::testing::WithParamInterface<int> {};
+class RtlProjectionClampTest : public MissionRoutePlannerTestBase, public ::testing::WithParamInterface<int> {};
 
 TEST_P(RtlProjectionClampTest, ClampsOutOfRangeMissionIndex)
 {
@@ -99,12 +99,12 @@ TEST_P(RtlProjectionClampTest, ClampsOutOfRangeMissionIndex)
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
 	};
 	VectorProvider provider(mission, {});
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 60.f, kAlt);
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 60.f, kAlt);
 
-	RtlRoutePlanner::ProjectionContext ctx_bad{};
-	RtlRoutePlanner::ProjectionContext ctx_zero{};
+	MissionRoutePlanner::ProjectionContext ctx_bad{};
+	MissionRoutePlanner::ProjectionContext ctx_zero{};
 
 	// WHEN: project with the bad index and with index 0
 	bool ok_bad  = planner.collectVehicleProjection(vehicle, bad_index, config, ctx_bad, &reason);
@@ -136,7 +136,7 @@ TEST_F(RtlProjectionTest, PrefersStoredLoopAnchor)
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f,   0.f, kAlt),
 	};
 	VectorProvider provider(mission, {});
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
 	// Set the stored loop anchor to segment [2->0]
 	config.last_flown_loop_segment.start.idx = 2;
@@ -146,7 +146,7 @@ TEST_F(RtlProjectionTest, PrefersStoredLoopAnchor)
 	config.last_flown_loop_segment.is_loop = true;
 	config.last_flown_loop_segment.loops_remaining = 1;
 
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 75.f, 10.f, kAlt);
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 75.f, 10.f, kAlt);
 
 	// WHEN: project with mission_index=0 (inside the loop)
 	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, &reason);
@@ -168,9 +168,9 @@ TEST_F(RtlProjectionTest, DefaultMission_OnCurrentSegment)
 {
 	// GIVEN: default dataset mission, vehicle near segment [1-2]
 	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
 
 	// WHEN: project with mission_index=2
 	bool ok = planner.collectVehicleProjection(vehicle, 2, config, ctx, &reason);
@@ -187,9 +187,9 @@ TEST_F(RtlProjectionTest, DefaultMission_OnSameSegment)
 {
 	// GIVEN: default dataset mission, vehicle on segment [0-1]
 	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.098944316424465, 2.2977800821792327, 475.6f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.098944316424465, 2.2977800821792327, 475.6f);
 
 	// WHEN: project with mission_index=1
 	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
@@ -206,9 +206,9 @@ TEST_F(RtlProjectionTest, DefaultMission_FrontBackDifferentSegment)
 {
 	// GIVEN: default dataset mission, vehicle near segment [4-5]
 	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.10795279737903, 2.299475977516394, 454.4f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10795279737903, 2.299475977516394, 454.4f);
 
 	// WHEN: project with mission_index=5
 	bool ok = planner.collectVehicleProjection(vehicle, 5, config, ctx, &reason);
@@ -225,9 +225,9 @@ TEST_F(RtlProjectionTest, DefaultMission_CoincidingSegments)
 {
 	// GIVEN: default dataset mission, vehicle near coinciding segments
 	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.11174050459439, 2.2876843642852362, 475.9f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.11174050459439, 2.2876843642852362, 475.9f);
 
 	// WHEN: project with mission_index=8
 	bool ok = planner.collectVehicleProjection(vehicle, 8, config, ctx, &reason);
@@ -244,9 +244,9 @@ TEST_F(RtlProjectionTest, DefaultMission_AtRouteEnd)
 {
 	// GIVEN: default dataset mission, vehicle near the final segment
 	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.112843317707494, 2.3059421291432525, 455.4f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.112843317707494, 2.3059421291432525, 455.4f);
 
 	// WHEN: project with mission_index=15
 	bool ok = planner.collectVehicleProjection(vehicle, 15, config, ctx, &reason);
@@ -267,9 +267,9 @@ TEST_F(RtlProjectionTest, CornerMission_OnSeg1To2)
 {
 	// GIVEN: corner dataset mission, vehicle near segment [1-2]
 	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.103348739288705, 2.3235968076446945, 479.7f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.103348739288705, 2.3235968076446945, 479.7f);
 
 	// WHEN: project with mission_index=2
 	bool ok = planner.collectVehicleProjection(vehicle, 2, config, ctx, &reason);
@@ -286,9 +286,9 @@ TEST_F(RtlProjectionTest, CornerMission_OnSeg4To5)
 {
 	// GIVEN: corner dataset mission, vehicle near segment [4-5]
 	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.10205080248656, 2.318838207366314, 462.1f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10205080248656, 2.318838207366314, 462.1f);
 
 	// WHEN: project with mission_index=5
 	bool ok = planner.collectVehicleProjection(vehicle, 5, config, ctx, &reason);
@@ -305,9 +305,9 @@ TEST_F(RtlProjectionTest, CornerMission_OnSmallSegment)
 {
 	// GIVEN: corner dataset mission, vehicle near tiny segment [12-13]
 	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(46.10361319095525, 2.3183349874167636, 462.6f);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10361319095525, 2.3183349874167636, 462.6f);
 
 	// WHEN: project with mission_index=13
 	bool ok = planner.collectVehicleProjection(vehicle, 13, config, ctx, &reason);
@@ -337,15 +337,15 @@ TEST_F(RtlProjectionTest, TakeoffIsLocalMinimum)
 		makeSafePointAbsolute(47.0000000, 7.9990000, 500.f),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0000000, 500.f);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0000000, 500.f);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: selection found, branch-off on segment [0-1], projection near takeoff
 	ASSERT_TRUE(selection.found);
@@ -370,15 +370,15 @@ TEST_F(RtlProjectionTest, StackedWaypointAboveTakeoff)
 		makeSafePointAbsolute(47.0000000, 7.9990000, 500.f),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0000000, 500.f);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0000000, 500.f);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: selection found, projection near takeoff position
 	ASSERT_TRUE(selection.found);
@@ -401,15 +401,15 @@ TEST_F(RtlProjectionTest, StackedWaypointAboveLand)
 		makeSafePointAbsolute(47.0000000, 8.0030000, 500.f),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0010000, 500.f);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(47.0000000, 8.0010000, 500.f);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 2, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: selection found, projection near land position
 	ASSERT_TRUE(selection.found);
@@ -433,15 +433,15 @@ TEST_F(RtlProjectionTest, StraightLineIgnoresNonMinCorners)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 450.f, 50.f, kAlt),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 450.f, 0.f, kAlt);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 450.f, 0.f, kAlt);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: branch-off segment is [4-5], not corner artifacts
 	ASSERT_TRUE(selection.found);
@@ -470,17 +470,17 @@ TEST_F(RtlProjectionTest, RectangleKeepsThreeClosestSegments)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 500.f, -50.f, kAlt),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
 	config.vehicle_projection_search_dist = 2000.f;
 	config.safe_point_projection_search_dist = 2000.f;
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 3, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: the farthest segment [1-2] (right side) should not be selected
 	ASSERT_TRUE(selection.found);
@@ -509,17 +509,17 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 250.f, kAlt),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
 	config.vehicle_projection_search_dist = 500.f;
 	config.safe_point_projection_search_dist = 500.f;
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 300.f, 200.f, kAlt);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 300.f, 200.f, kAlt);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 9, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: selection found despite duplicate corner waypoints
 	EXPECT_TRUE(selection.found);
@@ -531,7 +531,7 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 
 // WHY: NaN and Infinity coordinates should cause projection to fail gracefully rather than producing undefined results.
 // WHAT: Pass NaN, +Infinity, and -Infinity for latitude and longitude. collectVehicleProjection should return false.
-class RtlProjectionInvalidCoordTest : public RtlRoutePlannerTestBase,
+class RtlProjectionInvalidCoordTest : public MissionRoutePlannerTestBase,
 	public ::testing::WithParamInterface<std::pair<double, double>> {};
 
 TEST_P(RtlProjectionInvalidCoordTest, InvalidVehiclePositionFails)
@@ -545,10 +545,10 @@ TEST_P(RtlProjectionInvalidCoordTest, InvalidVehiclePositionFails)
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
 	};
 	VectorProvider provider(mission, {});
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
 	// WHEN: vehicle with invalid coordinate
-	RtlRoutePlanner::Position vehicle{};
+	MissionRoutePlanner::Position vehicle{};
 	vehicle.lat = lat;
 	vehicle.lon = lon;
 	vehicle.alt = kAlt;
@@ -580,9 +580,9 @@ TEST_F(RtlProjectionTest, SingleWaypointMissionFails)
 		makePositionItem(kBaseLat, kBaseLon, kAlt),
 	};
 	VectorProvider provider(mission, {});
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
-	RtlRoutePlanner::Position vehicle = makePositionAbsolute(kBaseLat, kBaseLon, kAlt);
+	MissionRoutePlanner::Position vehicle = makePositionAbsolute(kBaseLat, kBaseLon, kAlt);
 
 	// WHEN: attempt projection
 	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, &reason);
@@ -609,17 +609,17 @@ TEST_F(RtlProjectionTest, ZigzagMissionStressesCandidateBuffer)
 		makeSafePointFromOffset(kBaseLat, kBaseLon, 100.f, 680.f, kAlt),
 	};
 	VectorProvider provider(mission, safe_points);
-	RtlRoutePlanner planner(provider);
+	MissionRoutePlanner planner(provider);
 
 	config.vehicle_projection_search_dist = 500.f;
 	config.safe_point_projection_search_dist = 500.f;
-	RtlRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 600.f, kAlt);
-	RtlRoutePlanner::ProjectionContext proj_ctx{};
+	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 600.f, kAlt);
+	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
 	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, &reason);
 	ASSERT_TRUE(ok);
-	RtlRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
+	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
 	// THEN: selection found despite many local minima stressing the buffer
 	ASSERT_TRUE(selection.found);

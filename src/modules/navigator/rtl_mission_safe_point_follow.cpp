@@ -59,24 +59,24 @@ bool isLandingCommand(const mission_item_s &mission_item)
 
 } // namespace
 
-RtlMissionSafePointFollow::RtlMissionSafePointFollow(Navigator *navigator, mission_s mission,
-		DatamanCache &full_mission_cache) :
-	RtlBase(navigator, DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE),
-	_full_mission_cache(full_mission_cache)
+RtlMissionSafePointFollow::RtlMissionSafePointFollow(Navigator *navigator, mission_s mission) :
+	RtlBase(navigator, DEFAULT_MISSION_SAFE_POINT_FOLLOW_CACHE_SIZE)
 {
 	_mission = mission;
 }
 
 bool RtlMissionSafePointFollow::loadMissionItemFromCache(int32_t index, mission_item_s &mission_item)
 {
-	return index >= 0
+	MissionRouteCache *mission_route_cache = _navigator->get_mission_route_cache();
+
+	return mission_route_cache != nullptr
+	       && mission_route_cache->isReady(_mission)
+	       && index >= 0
 	       && index < _mission.count
-	       && _full_mission_cache.loadWait(static_cast<dm_item_t>(_mission.mission_dataman_id), index,
-					       reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
-					       MAX_DATAMAN_LOAD_WAIT);
+	       && mission_route_cache->loadMissionItem(index, mission_item);
 }
 
-void RtlMissionSafePointFollow::setRoutePlan(const RtlRoutePlanner::Plan &plan)
+void RtlMissionSafePointFollow::setRoutePlan(const MissionRoutePlanner::Plan &plan)
 {
 	_plan = plan;
 	_branch_off_index = _plan.selection.branchOffIndex();
@@ -84,12 +84,6 @@ void RtlMissionSafePointFollow::setRoutePlan(const RtlRoutePlanner::Plan &plan)
 
 	if (_plan.valid() && !_plan.join_context.valid()) {
 		_plan.join_context.projection = _plan.projection_context.seg_candidate.projection;
-	}
-
-	if (_plan.valid()) {
-		_join_requires_back_transition =
-			vtolTransitionActionForTarget(_plan.selection.path.first_item_index,
-						      _plan.selection.path.direction_reversed) == VtolTransitionAction::BackTransition;
 	}
 }
 
@@ -105,20 +99,29 @@ void RtlMissionSafePointFollow::on_inactivation()
 
 void RtlMissionSafePointFollow::on_activation()
 {
+	_vehicle_status_sub.update();
+	_land_detected_sub.update();
+
 	_stage = Stage::Idle;
 	_branch_off_index = _plan.selection.branchOffIndex();
 	updateLastFlownLoopSegmentFromPlan();
+	resetJoinRouteState();
+	bool use_join_route = false;
+	bool join_requires_back_transition = false;
 
 	if (_plan.valid()) {
 		setMissionIndex(_plan.selection.path.first_item_index);
 		_is_current_planned_mission_item_valid = isMissionValid();
 
-		const bool reverse_land_from_takeoff = _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff
+		const bool reverse_land_from_takeoff = _plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionTakeoff
 						       && _plan.selection.path.direction_reversed
 						       && _plan.selection.path.in_first_item_acc_rad;
 
-		_stage = (_should_go_straight_to_goal || _plan.selection.direct_to_safe_point || reverse_land_from_takeoff)
-			 ? Stage::LandAtGoal : Stage::JoinRoute;
+		use_join_route = !(_should_go_straight_to_goal || _plan.selection.direct_to_safe_point || reverse_land_from_takeoff);
+		join_requires_back_transition = use_join_route
+						&& (vtolTransitionActionForTarget(_plan.selection.path.first_item_index,
+								_plan.selection.path.direction_reversed) == VtolTransitionAction::BackTransition);
+		_stage = use_join_route ? Stage::FollowRoute : Stage::LandAtGoal;
 
 		PX4_INFO("RTL SRP activate: goal=%u target=%d rev=%u direct=%u stage=%u branch_off=%d",
 			 static_cast<unsigned>(_plan.selection.goal_type),
@@ -134,12 +137,17 @@ void RtlMissionSafePointFollow::on_activation()
 
 	if (_land_detected_sub.get().landed) {
 		_is_current_planned_mission_item_valid = false;
+		use_join_route = false;
 	}
 
 	// Reset the triplet when SRP retargets the mission so the controller does not keep following a stale line.
 	_navigator->get_position_setpoint_triplet()->previous.valid = false;
 	_navigator->get_position_setpoint_triplet()->current.valid = false;
 	_navigator->get_position_setpoint_triplet()->next.valid = false;
+
+	if (_is_current_planned_mission_item_valid && use_join_route) {
+		setupJoinRoute(_plan.join_context, join_requires_back_transition);
+	}
 
 	MissionBase::on_activation();
 }
@@ -191,44 +199,6 @@ bool RtlMissionSafePointFollow::advanceRouteTarget()
 bool RtlMissionSafePointFollow::setNextMissionItem()
 {
 	switch (_stage) {
-	case Stage::JoinRoute:
-		if (_join_requires_back_transition) {
-			_stage = Stage::TransitionAfterJoin;
-			PX4_DEBUG("RTL SRP join route reached, applying BT before following route");
-
-		} else if (joinProjectionNearBranchOff()) {
-			_should_go_straight_to_goal = true;
-			_stage = Stage::LandAtGoal;
-			PX4_DEBUG("RTL SRP join projection is already near branch-off, flying straight to goal");
-
-		} else if (currentTargetIsBranchOff()) {
-			_stage = Stage::BranchOff;
-			PX4_DEBUG("RTL SRP current target is branch-off, leaving route for goal");
-
-		} else {
-			_stage = Stage::FollowRoute;
-			PX4_DEBUG("RTL SRP join route reached, following route");
-		}
-
-		return true;
-
-	case Stage::TransitionAfterJoin:
-		if (joinProjectionNearBranchOff()) {
-			_should_go_straight_to_goal = true;
-			_stage = Stage::LandAtGoal;
-			PX4_DEBUG("RTL SRP join transition complete, flying straight to goal");
-
-		} else if (currentTargetIsBranchOff()) {
-			_stage = Stage::BranchOff;
-			PX4_DEBUG("RTL SRP current target is branch-off after join transition, leaving route for goal");
-
-		} else {
-			_stage = Stage::FollowRoute;
-			PX4_DEBUG("RTL SRP join transition complete, following route");
-		}
-
-		return true;
-
 	case Stage::FollowRoute:
 		return advanceRouteTarget();
 
@@ -253,7 +223,7 @@ bool RtlMissionSafePointFollow::setNextMissionItem()
 }
 
 void RtlMissionSafePointFollow::setWaypointMissionItem(mission_item_s &mission_item,
-		const RtlRoutePlanner::Position &position, bool autocontinue, bool vtol_back_transition_required) const
+		const MissionRoutePlanner::Position &position, bool autocontinue, bool vtol_back_transition_required) const
 {
 	mission_item = {};
 	mission_item.nav_cmd = NAV_CMD_WAYPOINT;
@@ -285,7 +255,7 @@ void RtlMissionSafePointFollow::setLandMissionItem(mission_item_s &mission_item)
 	mission_item.lat = _plan.selection.goal_position.lat;
 	mission_item.lon = _plan.selection.goal_position.lon;
 
-	if (_plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff && _plan.selection.path.direction_reversed) {
+	if (_plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionTakeoff && _plan.selection.path.direction_reversed) {
 		// Reverse landing at the takeoff point: land at ground level, not at the takeoff altitude.
 		mission_item.altitude = _navigator->home_global_position_valid()
 					? _navigator->get_home_position()->alt
@@ -323,7 +293,6 @@ void RtlMissionSafePointFollow::normalizeRouteMissionItem(mission_item_s &missio
 	mission_item.time_inside = 0.f;
 }
 
-
 bool RtlMissionSafePointFollow::currentTargetIsBranchOff() const
 {
 	return _plan.selection.safe_point_found
@@ -352,53 +321,7 @@ void RtlMissionSafePointFollow::updateLastFlownLoopSegmentFromPlan()
 
 void RtlMissionSafePointFollow::updateLastFlownLoopSegmentForNominalAdvance()
 {
-	_last_flown_loop_segment = {};
-
-	for (int32_t index = _mission.current_seq + 1; index < _mission.count; ++index) {
-		mission_item_s mission_item{};
-
-		if (!loadMissionItemFromCache(index, mission_item)) {
-			return;
-		}
-
-		if (mission_item.nav_cmd == NAV_CMD_DO_JUMP
-		    && mission_item.do_jump_current_count < mission_item.do_jump_repeat_count) {
-			int32_t loop_start_index = -1;
-			int32_t loop_end_index = -1;
-
-			if (!findAttachedPositionIndex(index, loop_start_index)
-			    || !findNextPositionIndexNoJump(mission_item.do_jump_mission_index, loop_end_index)) {
-				return;
-			}
-
-			mission_item_s loop_start_item{};
-			mission_item_s loop_end_item{};
-
-			if (!loadMissionItemFromCache(loop_start_index, loop_start_item)
-			    || !loadMissionItemFromCache(loop_end_index, loop_end_item)) {
-				return;
-			}
-
-			_last_flown_loop_segment.start.idx = loop_start_index;
-			_last_flown_loop_segment.start.nav_cmd = loop_start_item.nav_cmd;
-			_last_flown_loop_segment.end.idx = loop_end_index;
-			_last_flown_loop_segment.end.nav_cmd = loop_end_item.nav_cmd;
-			_last_flown_loop_segment.is_loop = true;
-			const int remaining_loops = static_cast<int>(mission_item.do_jump_repeat_count)
-						    - static_cast<int>(mission_item.do_jump_current_count);
-			_last_flown_loop_segment.loops_remaining = static_cast<uint8_t>(remaining_loops > 0 ? remaining_loops : 0);
-
-			PX4_DEBUG("RTL SRP on loop jump seg [%u,%u], jump idx: %u",
-				  static_cast<unsigned>(_last_flown_loop_segment.start.idx),
-				  static_cast<unsigned>(_last_flown_loop_segment.end.idx),
-				  static_cast<unsigned>(mission_item.do_jump_mission_index));
-			return;
-		}
-
-		if (MissionBlock::item_contains_position(mission_item)) {
-			break;
-		}
-	}
+	MissionBase::updateLastFlownLoopSegmentForNominalAdvance(_last_flown_loop_segment);
 }
 
 bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_item, int32_t *adjacent_index)
@@ -432,7 +355,6 @@ bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_it
 		return loadMissionItemFromCache(adjacent_route_index, mission_item);
 	}
 }
-
 
 void RtlMissionSafePointFollow::publishRouteItems(position_setpoint_triplet_s *pos_sp_triplet,
 		const position_setpoint_s &current_setpoint_copy, const mission_item_s &current_mission_item,
@@ -524,55 +446,29 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 	position_setpoint_triplet_s *pos_sp_triplet = _navigator->get_position_setpoint_triplet();
 	const position_setpoint_s current_setpoint_copy = pos_sp_triplet->current;
 
+	if (handleJoinRouteState(pos_sp_triplet, current_setpoint_copy)) {
+		return;
+	}
+
+	if (_stage == Stage::FollowRoute) {
+		if (joinProjectionNearBranchOff()) {
+			_should_go_straight_to_goal = true;
+			_stage = Stage::LandAtGoal;
+			PX4_DEBUG("RTL SRP join projection is already near branch-off, flying straight to goal");
+
+		} else if (currentTargetIsBranchOff()) {
+			_stage = Stage::BranchOff;
+			PX4_DEBUG("RTL SRP current target is branch-off, leaving route for goal");
+		}
+	}
+
 	switch (_stage) {
-	case Stage::JoinRoute: {
-			mission_item_s join_item{};
-			mission_item_s next_route_item = _mission_item;
-			normalizeRouteMissionItem(next_route_item);
-			setWaypointMissionItem(join_item, _plan.join_context.projection, true,
-					       _join_requires_back_transition);
-
-			if (_plan.join_context.skip_altitude_requirement) {
-				join_item.altitude = _navigator->get_global_position()->alt;
-			}
-
-			publishRouteItems(pos_sp_triplet, current_setpoint_copy, join_item, &next_route_item);
-			break;
-		}
-
-	case Stage::TransitionAfterJoin: {
-			if (_join_requires_back_transition
-			    && (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
-				|| _vehicle_status_sub.get().in_transition_to_fw)
-			    && !_land_detected_sub.get().landed) {
-
-				PX4_DEBUG("RTL SRP join route applying BT");
-				set_vtol_transition_item(&_mission_item, vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
-				_mission_item.yaw = NAN;
-				pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
-				pos_sp_triplet->previous.valid = false;
-				issue_command(_mission_item);
-				reset_mission_item_reached();
-
-				if (_mission_type == MissionType::MISSION_TYPE_MISSION) {
-					set_mission_result();
-				}
-
-				publish_navigator_mission_item();
-				_navigator->set_position_setpoint_triplet_updated();
-				break;
-			}
-
-			_stage = Stage::FollowRoute;
-			[[fallthrough]];
-		}
-
 	case Stage::FollowRoute: {
-			const bool current_item_is_mission_landing = _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand
+			const bool current_item_is_mission_landing = _plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionLand
 					&& isLandingCommand(_mission_item);
 
 			// Assume takeoff is always at index 0. Reversing exhausts the route here.
-			const bool current_item_is_mission_takeoff = _plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff
+			const bool current_item_is_mission_takeoff = _plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionTakeoff
 					&& _mission.current_seq == 0;
 
 			if (current_item_is_mission_landing || current_item_is_mission_takeoff) {
@@ -599,7 +495,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 					: VtolTransitionAction::None; // Already issued for this target.
 
 			mission_item_s current_route_item = _mission_item;
-			const bool current_item_is_endpoint = _plan.selection.goal_type != RtlRoutePlanner::GoalType::SafePoint
+			const bool current_item_is_endpoint = _plan.selection.goal_type != MissionRoutePlanner::GoalType::SafePoint
 							      && isLandingCommand(_mission_item);
 
 			if (!current_item_is_endpoint) {
@@ -619,7 +515,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 					// before it becomes the active current mission item.
 					setWaypointMissionItem(next_route_item, _plan.selection.branch_off_projection, true);
 
-				} else if (!(_plan.selection.goal_type != RtlRoutePlanner::GoalType::SafePoint
+				} else if (!(_plan.selection.goal_type != MissionRoutePlanner::GoalType::SafePoint
 					     && (next_route_item.nav_cmd == NAV_CMD_TAKEOFF
 						 || next_route_item.nav_cmd == NAV_CMD_VTOL_TAKEOFF
 						 || next_route_item.nav_cmd == NAV_CMD_LAND
@@ -684,7 +580,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 	case Stage::LandAtGoal: {
 			mission_item_s land_item{};
 
-			if (_plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand && isLandingCommand(_mission_item)) {
+			if (_plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionLand && isLandingCommand(_mission_item)) {
 				land_item = _mission_item;
 
 			} else {
@@ -736,28 +632,19 @@ rtl_time_estimate_s RtlMissionSafePointFollow::calc_rtl_time_estimate()
 		altitude = target_alt;
 	};
 
+	if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE
+	     || _work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)
+	    && _plan.join_context.valid()) {
+		add_leg(_plan.join_context.projection.lat,
+			_plan.join_context.projection.lon,
+			_plan.join_context.projection.alt);
+	}
+
 	switch (_stage) {
-	case Stage::JoinRoute:
-	case Stage::TransitionAfterJoin:
-
-		// Add the join leg: vehicle → join projection.
-		if (_plan.join_context.valid()) {
-			add_leg(_plan.join_context.projection.lat,
-				_plan.join_context.projection.lon,
-				_plan.join_context.projection.alt);
-		}
-
-		[[fallthrough]];
-
 	case Stage::FollowRoute:
 	case Stage::TransitionDuringRoute: {
 			// Walk the remaining route items from the current target to the branch-off (or endpoint).
 			int32_t walk_index = _mission.current_seq;
-
-			// For JoinRoute/TransitionAfterJoin the walk starts at the first route item.
-			if (_stage == Stage::JoinRoute || _stage == Stage::TransitionAfterJoin) {
-				walk_index = _plan.selection.path.first_item_index;
-			}
 
 			// Walk up to a reasonable limit to avoid infinite loops on corrupted data.
 			for (int steps = 0; steps < _mission.count && walk_index >= 0 && walk_index < _mission.count; ++steps) {
@@ -777,11 +664,11 @@ rtl_time_estimate_s RtlMissionSafePointFollow::calc_rtl_time_estimate()
 					}
 
 					if (!_plan.selection.safe_point_found) {
-						if (_plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionLand && isLandingCommand(mi)) {
+						if (_plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionLand && isLandingCommand(mi)) {
 							break;
 						}
 
-						if (_plan.selection.goal_type == RtlRoutePlanner::GoalType::MissionTakeoff && walk_index == 0) {
+						if (_plan.selection.goal_type == MissionRoutePlanner::GoalType::MissionTakeoff && walk_index == 0) {
 							break;
 						}
 					}

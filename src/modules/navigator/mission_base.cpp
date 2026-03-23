@@ -193,6 +193,7 @@ MissionBase::on_inactivation()
 
 	/* reset so current mission item gets restarted if mission was paused */
 	_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+	resetJoinRouteState();
 
 	/* reset so MISSION_ITEM_REACHED isn't published */
 	_navigator->get_mission_result()->seq_reached = -1;
@@ -336,7 +337,7 @@ MissionBase::on_active()
 	if (_mission_type != MissionType::MISSION_TYPE_NONE && is_mission_item_reached_or_completed()) {
 		/* If we just completed a takeoff which was inserted before the right waypoint,
 		   there is no need to report that we reached it because we didn't. */
-		if (_work_item_type != WorkItemType::WORK_ITEM_TYPE_CLIMB) {
+		if (shouldReportMissionItemReached()) {
 			set_mission_item_reached();
 		}
 
@@ -452,8 +453,13 @@ void MissionBase::update_mission()
 	_navigator->reset_vroi();
 
 	if (_navigator->get_mission_result()->valid) {
+		const bool preserve_join_route_work_item = (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE)
+				|| (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN);
+
 		/* reset work item if new mission has been accepted */
-		_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+		if (!preserve_join_route_work_item) {
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+		}
 
 		/* reset mission failure if we have an updated valid mission */
 		_navigator->get_mission_result()->failure = false;
@@ -474,6 +480,12 @@ void MissionBase::update_mission()
 void
 MissionBase::advance_mission()
 {
+	if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE)
+	    || (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)) {
+		advanceJoinRouteState();
+		return;
+	}
+
 	/* do not advance mission item if we're processing sub mission work items */
 	if (_work_item_type != WorkItemType::WORK_ITEM_TYPE_DEFAULT) {
 		return;
@@ -586,6 +598,19 @@ MissionBase::set_mission_item_reached()
 	_navigator->set_mission_result_updated();
 
 	reset_mission_item_reached();
+}
+
+bool MissionBase::shouldReportMissionItemReached() const
+{
+	switch (_work_item_type) {
+	case WorkItemType::WORK_ITEM_TYPE_CLIMB:
+	case WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE:
+	case WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN:
+		return false;
+
+	default:
+		return true;
+	}
 }
 
 void
@@ -731,6 +756,129 @@ bool MissionBase::position_setpoint_equal(const position_setpoint_s *p1, const p
 		((fabsf(p1->cruising_throttle - p2->cruising_throttle) < FLT_EPSILON) || (!PX4_ISFINITE(p1->cruising_throttle)
 				&& !PX4_ISFINITE(p2->cruising_throttle))));
 
+}
+
+void MissionBase::setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context, bool requires_transition)
+{
+	_route_join_context = join_context;
+	_join_requires_back_transition = requires_transition;
+	_work_item_type = WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE;
+}
+
+void MissionBase::resetJoinRouteState()
+{
+	_route_join_context = {};
+	_join_requires_back_transition = false;
+}
+
+bool MissionBase::handleJoinRouteState(position_setpoint_triplet_s *pos_sp_triplet,
+				       const position_setpoint_s &current_setpoint_copy)
+{
+	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE) {
+		if (_route_join_context.valid() == false) {
+			resetJoinRouteState();
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+			return false;
+		}
+
+		mission_item_s join_item{};
+		join_item.nav_cmd = NAV_CMD_WAYPOINT;
+		join_item.lat = _route_join_context.projection.lat;
+		join_item.lon = _route_join_context.projection.lon;
+		join_item.altitude = _route_join_context.projection.alt;
+		join_item.altitude_is_relative = false;
+		join_item.acceptance_radius = _navigator->get_acceptance_radius();
+		join_item.yaw = NAN;
+		join_item.time_inside = 0.f;
+		join_item.autocontinue = true;
+		join_item.origin = ORIGIN_ONBOARD;
+
+		if (_route_join_context.skip_altitude_requirement && _navigator->get_global_position() != nullptr) {
+			join_item.altitude = _navigator->get_global_position()->alt;
+		}
+
+		if (_join_requires_back_transition) {
+			join_item.vtol_back_transition = true;
+
+		} else if ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
+			   || (_vehicle_status_sub.get().in_transition_mode
+			       && (_vehicle_status_sub.get().in_transition_to_fw == false))) {
+			join_item.acceptance_radius = 2.f * _navigator->get_acceptance_radius();
+		}
+
+		mission_item_to_position_setpoint(join_item, &pos_sp_triplet->current);
+		_navigator->reset_position_setpoint(pos_sp_triplet->next);
+
+		if (position_setpoint_equal(&pos_sp_triplet->current, &current_setpoint_copy) == false) {
+			pos_sp_triplet->previous = current_setpoint_copy;
+		}
+
+		issue_command(join_item);
+		_mission_item = join_item;
+		_work_item_type = WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE;
+		reset_mission_item_reached();
+
+		if (_mission_type == MissionType::MISSION_TYPE_MISSION) {
+			set_mission_result();
+		}
+
+		publish_navigator_mission_item();
+		_navigator->set_position_setpoint_triplet_updated();
+		return true;
+	}
+
+	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN) {
+		if (_join_requires_back_transition
+		    && ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
+			|| _vehicle_status_sub.get().in_transition_to_fw)
+		    && (_land_detected_sub.get().landed == false)) {
+			set_vtol_transition_item(&_mission_item, vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
+			_mission_item.yaw = NAN;
+			pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
+			pos_sp_triplet->previous.valid = false;
+			issue_command(_mission_item);
+			reset_mission_item_reached();
+
+			if (_mission_type == MissionType::MISSION_TYPE_MISSION) {
+				set_mission_result();
+			}
+
+			publish_navigator_mission_item();
+			_navigator->set_position_setpoint_triplet_updated();
+			return true;
+		}
+
+		resetJoinRouteState();
+		_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+	}
+
+	return false;
+}
+
+bool MissionBase::advanceJoinRouteState()
+{
+	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE) {
+		if (_join_requires_back_transition
+		    && ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
+			|| _vehicle_status_sub.get().in_transition_to_fw)
+		    && (_land_detected_sub.get().landed == false)) {
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN;
+
+		} else {
+			resetJoinRouteState();
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+		}
+
+		return true;
+	}
+
+	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN) {
+		resetJoinRouteState();
+		_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+		return true;
+	}
+
+	return false;
 }
 
 void
@@ -1185,6 +1333,53 @@ MissionBase::VtolTransitionAction MissionBase::vtolTransitionActionForTarget(int
 	}
 
 	return VtolTransitionAction::None;
+}
+
+void MissionBase::updateLastFlownLoopSegmentForNominalAdvance(MissionRoutePlanner::Segment &last_flown_loop_segment)
+{
+	last_flown_loop_segment = {};
+
+	for (int32_t index = _mission.current_seq + 1; index < _mission.count; ++index) {
+		mission_item_s mission_item{};
+
+		if (!loadMissionItemFromCache(index, mission_item)) {
+			return;
+		}
+
+		if (mission_item.nav_cmd == NAV_CMD_DO_JUMP
+		    && mission_item.do_jump_current_count < mission_item.do_jump_repeat_count) {
+			int32_t loop_start_index = -1;
+			int32_t loop_end_index = -1;
+
+			if (!findAttachedPositionIndex(index, loop_start_index)
+			    || !findNextPositionIndexNoJump(mission_item.do_jump_mission_index, loop_end_index)) {
+				return;
+			}
+
+			mission_item_s loop_start_item{};
+			mission_item_s loop_end_item{};
+
+			if (!loadMissionItemFromCache(loop_start_index, loop_start_item)
+			    || !loadMissionItemFromCache(loop_end_index, loop_end_item)) {
+				return;
+			}
+
+			last_flown_loop_segment.start.idx = loop_start_index;
+			last_flown_loop_segment.start.nav_cmd = loop_start_item.nav_cmd;
+			last_flown_loop_segment.end.idx = loop_end_index;
+			last_flown_loop_segment.end.nav_cmd = loop_end_item.nav_cmd;
+			last_flown_loop_segment.is_loop = true;
+
+			const int remaining_loops = static_cast<int>(mission_item.do_jump_repeat_count)
+						    - static_cast<int>(mission_item.do_jump_current_count);
+			last_flown_loop_segment.loops_remaining = static_cast<uint8_t>(remaining_loops > 0 ? remaining_loops : 0);
+			return;
+		}
+
+		if (item_contains_position(mission_item)) {
+			break;
+		}
+	}
 }
 
 void MissionBase::getPreviousPositionItems(int32_t start_index, int32_t items_index[],

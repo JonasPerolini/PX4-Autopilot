@@ -57,6 +57,7 @@
 
 #include "mission_block.h"
 #include "navigation.h"
+#include "mission_route_planner.h"
 
 using namespace time_literals;
 
@@ -87,8 +88,10 @@ protected:
 	enum class WorkItemType {
 		WORK_ITEM_TYPE_DEFAULT,		/**< default mission item */
 		WORK_ITEM_TYPE_CLIMB,		/**< takeoff before moving to waypoint */
+		WORK_ITEM_TYPE_JOIN_ROUTE,	/**< fly a virtual branch-in waypoint before resuming the mission */
+		WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN,	/**< perform a VTOL back-transition after rejoining the route */
 		WORK_ITEM_TYPE_MOVE_TO_LAND,	/**< move to land waypoint before descent */
-		WORK_ITEM_TYPE_ALIGN_HEADING,		/**< align for next waypoint */
+		WORK_ITEM_TYPE_ALIGN_HEADING,	/**< align for next waypoint */
 		WORK_ITEM_TYPE_TRANSITION_AFTER_TAKEOFF,
 		WORK_ITEM_TYPE_MOVE_TO_LAND_AFTER_TRANSITION,
 		WORK_ITEM_TYPE_PRECISION_LAND
@@ -98,6 +101,9 @@ protected:
 		MISSION_TYPE_NONE,
 		MISSION_TYPE_MISSION
 	} _mission_type{MissionType::MISSION_TYPE_NONE};
+
+	MissionRoutePlanner::JoinContext _route_join_context{};
+	bool _join_requires_back_transition{false};
 
 	/**
 	 * @brief Get the Previous Mission Position Items
@@ -317,6 +323,31 @@ protected:
 	bool position_setpoint_equal(const position_setpoint_s *p1, const position_setpoint_s *p2) const;
 
 	/**
+	 * @brief Arm a virtual branch-in waypoint and optional post-join back-transition.
+	 */
+	void setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context, bool requires_transition);
+
+	/**
+	 * @brief Clear any pending virtual join-route state.
+	 */
+	void resetJoinRouteState();
+
+	/**
+	 * @brief Publish the active virtual join-route work item if one is pending.
+	 *
+	 * @return true if a join-route work item was published and the caller should return.
+	 */
+	bool handleJoinRouteState(position_setpoint_triplet_s *pos_sp_triplet,
+				  const position_setpoint_s &current_setpoint_copy);
+
+	/**
+	 * @brief Advance the virtual join-route work item state machine.
+	 *
+	 * @return true if a join-route work item was advanced.
+	 */
+	bool advanceJoinRouteState();
+
+	/**
 	 * @brief Set the Mission Index
 	 *
 	 * @param[in] index Index of the mission item
@@ -395,6 +426,23 @@ protected:
 	 */
 	VtolTransitionAction vtolTransitionActionForTarget(int32_t target_index, bool direction_reversed);
 
+	/**
+	 * @brief Track the active DO_JUMP loop edge before a nominal mission advance.
+	 *
+	 * Scans forward from the current mission index until the next position-bearing
+	 * item. If an active DO_JUMP is encountered first, the returned segment anchors
+	 * the currently flown loop edge so projection-based replans can preserve route
+	 * continuity.
+	 */
+	void updateLastFlownLoopSegmentForNominalAdvance(MissionRoutePlanner::Segment &last_flown_loop_segment);
+
+	/**
+	 * @brief Check if the cached mission command history indicates that camera triggering was active.
+	 *
+	 * Derived mission modes use this to preserve the existing survey-resume behavior.
+	 */
+	bool cameraWasTriggering();
+
 	bool _is_current_planned_mission_item_valid{false};	/**< Flag indicating if the currently loaded mission item is valid*/
 	bool _mission_has_been_activated{false};		/**< Flag indicating if the mission has been activated*/
 	bool _mission_checked{false};				/**< Flag indicating if the mission has been checked by the mission validator*/
@@ -417,6 +465,12 @@ protected:
 	uORB::SubscriptionData<vehicle_global_position_s> _global_pos_sub{ORB_ID(vehicle_global_position)};	/**< global position subscription */
 	uORB::Publication<navigator_mission_item_s> _navigator_mission_item_pub{ORB_ID::navigator_mission_item}; /**< Navigator mission item publication*/
 	uORB::Publication<mission_s> _mission_pub{ORB_ID(mission)}; /**< Mission publication*/
+
+	/**
+	 * Reset mission
+	 */
+	void checkMissionRestart();
+
 private:
 	/**
 	 * @brief Maximum number of jump mission items iterations
@@ -435,14 +489,11 @@ private:
 	void updateMavlinkMission();
 
 	/**
-	 * Reset mission
-	 */
-	void checkMissionRestart();
-
-	/**
 	 * Set a mission item as reached
 	 */
 	void set_mission_item_reached();
+
+	bool shouldReportMissionItemReached() const;
 
 	/**
 	 * Updates the heading of the vehicle. Rotary wings only.
@@ -508,13 +559,6 @@ private:
 	 * @return true if there are cached items
 	 */
 	bool haveCachedCameraModeItems();
-
-	/**
-	 * @brief Check if the camera was triggering
-	 *
-	 * @return true if there was a camera trigger command in the cached items that didn't disable triggering
-	 */
-	bool cameraWasTriggering();
 
 	/**
 	 * @brief Parameters update

@@ -23,8 +23,8 @@ Tuning parameters:
 
 | Parameter | Description |
 | --- | --- |
-| [RTL_MC_SEG_DIST](../advanced_config/parameter_reference.md#RTL_MC_SEG_DIST) | Extra cross-track search window for multicopter or VTOL-in-MC vehicle projection. |
-| [RTL_FW_SEG_DIST](../advanced_config/parameter_reference.md#RTL_FW_SEG_DIST) | Extra cross-track search window for fixed-wing or VTOL-in-FW vehicle projection. |
+| [MIS_MC_SEG_DIST](../advanced_config/parameter_reference.md#MIS_MC_SEG_DIST) | Extra cross-track search window for multicopter or VTOL-in-MC vehicle projection. |
+| [MIS_FW_SEG_DIST](../advanced_config/parameter_reference.md#MIS_FW_SEG_DIST) | Extra cross-track search window for fixed-wing or VTOL-in-FW vehicle projection. |
 | [RTL_RP_SEG_DIST](../advanced_config/parameter_reference.md#RTL_RP_SEG_DIST) | Extra cross-track search window for safe-point projection. Increase if safe points are placed far from the mission route. |
 | [RTL_FW_UTURN_PEN](../advanced_config/parameter_reference.md#RTL_FW_UTURN_PEN) | U-turn distance penalty for fixed-wing and VTOL-in-FW safe-point scoring. Penalizes paths that require reversing direction. Set to 0 to disable. |
 | [NAV_ACC_RAD](../advanced_config/parameter_reference.md#NAV_ACC_RAD) | Affects join acceptance, branch-off acceptance, and the direct-to-safe-point shortcut. |
@@ -54,8 +54,8 @@ The algorithm for selecting a branch-in point is executed in three phases:
 **Phase 1 - Identifying valid candidates:**
 
 The system first identifies up to three potential projection points on the flight route by calculating perpendicular lines from the vehicle's current position to all route segments. A projection point is only considered a valid candidate if the crosstrack distance from the vehicle to the segment does not exceed the crosstrack distance to the closest available segment plus an allowed margin. This margin is determined by the vehicle's current flight mode:
- - Multicopter: [RTL_MC_SEG_DIST](../advanced_config/parameter_reference.md#RTL_MC_SEG_DIST) by default, 30 m.
- - Fixed-wing: [RTL_FW_SEG_DIST](../advanced_config/parameter_reference.md#RTL_FW_SEG_DIST) by default, 150 m.
+ - Multicopter: [MIS_MC_SEG_DIST](../advanced_config/parameter_reference.md#MIS_MC_SEG_DIST) by default, 30 m.
+ - Fixed-wing: [MIS_FW_SEG_DIST](../advanced_config/parameter_reference.md#MIS_FW_SEG_DIST) by default, 150 m.
 
 **Phase 2 - Selecting the best branch-in point:**
 From the potential candidates, the system selects the best branch-in point using a priority-based system.
@@ -200,15 +200,15 @@ Route Safe Point Return separates concerns into three roles:
 | Role | Class | Responsibility |
 | --- | --- | --- |
 | **Orchestrator** | `RTL` (in `rtl.cpp`) | Owns the planner and executor instances, triggers planning on RTL entry or mission change, passes the plan to the executor, and selects the active RTL type. |
-| **Brain** | `RtlRoutePlanner` (in `rtl_route_planner.h/cpp`) | Planning logic: projects the vehicle and safe points onto the mission route, scores candidates, and builds the `Plan` struct. Stateless between calls and fully testable via the `Provider` interface. |
-| **Pilot** | `RtlMissionSafePointFollow` (in `rtl_mission_safe_point_follow.h/cpp`) | Executes the plan built by the Brain. Manages a stage-based state machine (Join → Transition → Follow → BranchOff → Land) and publishes setpoints to the flight controller. Inherits from `RtlBase → MissionBase → MissionBlock`. |
+| **Brain** | `MissionRoutePlanner` (in `mission_route_planner.h/cpp`) | Planning logic: projects the vehicle and safe points onto the mission route, scores candidates, and builds the `Plan` struct. Stateless between calls and fully testable via the `Provider` interface. |
+| **Pilot** | `RtlMissionSafePointFollow` (in `rtl_mission_safe_point_follow.h/cpp`) | Executes the plan built by the Brain. Manages the route-follow / branch-off / landing stages and reuses `MissionBase` for join-route work items. Inherits from `RtlBase → MissionBase → MissionBlock`. |
 
 ### Data Flow
 
 ```
 RTL::setRtlTypeAndDestination()
   │
-  ├─ RtlRoutePlanner::buildPlan(config)
+  ├─ MissionRoutePlanner::planRouteToGoal(config)
   │    ├─ collectVehicleProjection()    → ProjectionContext
   │    ├─ selectSafePoint()             → Selection
   │    └─ choosePath()                  → Path + JoinContext
@@ -221,14 +221,15 @@ RTL::setRtlTypeAndDestination()
 
 ### State Machine
 
-The executor's stage machine progresses through these states:
+Join-route handling is now shared in `MissionBase`, while the RTL executor keeps only the route-specific stages.
 
 ```
-Idle → JoinRoute → TransitionAfterJoin → FollowRoute ⇄ TransitionDuringRoute → BranchOff → LandAtGoal
+MissionBase work items: Default → JoinRoute → TransitionAfterJoin → Default
+Executor stages:       Idle → FollowRoute ⇄ TransitionDuringRoute → BranchOff → LandAtGoal
 ```
 
-- `JoinRoute`: fly to the virtual branch-in waypoint.
-- `TransitionAfterJoin`: VTOL back-transition if the first route segment expects MC flight.
+- `JoinRoute`: a shared `MissionBase` work item that flies the virtual branch-in waypoint.
+- `TransitionAfterJoin`: a shared `MissionBase` work item that performs a VTOL back-transition after the join when required.
 - `FollowRoute`: walk mission items as geometry (skipping `DO_JUMP`), advancing via `advanceRouteTarget()`. When route traversal is exhausted (no more waypoints in either direction), the vehicle holds position if not already landed.
 - `TransitionDuringRoute`: a VTOL transition was detected mid-route. The transition command is issued once, and the stage waits for completion before returning to `FollowRoute`. This prevents transition command spamming.
 - `BranchOff`: replace the mission target with the virtual branch-off waypoint.
@@ -244,15 +245,20 @@ The executor injects three types of virtual waypoints that exist only in RAM:
 
 These virtual items are published through `publishRouteItems()` or `publishLandingItems()` and are indistinguishable from real mission items to the flight controller.
 
-### Activation Bypass
+### Activation Ordering
 
-The executor bypasses `MissionBase::on_activation()` camera/gimbal state replay to prevent CPU lockup on high-index missions. Because the route follower treats the mission as geometry only, replaying every camera and gimbal command from item zero up to the current index is unnecessary and would block the control loop on large missions.
+Mission mode and `RtlMissionSafePointFollow` now determine the final target index and arm any join-route work item **before** calling `MissionBase::on_activation()`. This matters for two reasons:
+
+- `MissionBase` caches camera, gimbal, trigger, and speed history up to `current_seq - 1`, so the target index must already point at the segment end that will be resumed.
+- `MissionBase` publishes the first active setpoint on activation, so the join route must already be armed to avoid a double publication of first the nominal waypoint and then the virtual branch-in waypoint.
+
+The result is a single clean publication on activation and correct replay of mission history when resuming after a route rejoin.
 
 ### Provider Interface
 
-`RtlRoutePlanner` accesses mission data through the `Provider` interface, which abstracts the dataman storage:
+`MissionRoutePlanner` accesses mission data through the `Provider` interface, which abstracts the dataman storage:
 
-- In production: `RtlRoutePlannerProvider` (in `rtl.cpp`) reads from the dataman cache.
+- In production: `MissionRouteCache` implements the provider directly and serves mission geometry, safe points, and the mission-land item from its dataman-backed caches.
 - In tests: `VectorProvider` (in `test_RTL_helpers.h`) provides mission items from an in-memory vector.
 
 This separation allows the planner to be fully unit-tested without SD card access or dataman dependencies.
@@ -276,21 +282,25 @@ Because reading from an SD card is slow and blocking, Navigator modes use `Datam
 
 Standard mission execution (Takeoff, Mission, direct RTL) only flies from waypoint A to waypoint B. It does not need the entire mission in RAM. `MissionBase` implements a sliding-window cache (typically 5 items). As the drone flies, it asynchronously fetches the next few waypoints. This keeps RAM usage low.
 
-#### The Random-Access Route Cache (RTL Orchestrator)
+#### The Random-Access Route Cache (`MissionRouteCache`)
 
-Route Safe Point Return (`RTL_TYPE=6`) must perform complex geometric projections. To find the safest branch-off point, `RtlRoutePlanner` must rapidly scan every segment of the mission against every safe point. Doing this with a 5-item sliding window would trigger thousands of synchronous SD card reads, completely locking up the flight controller.
+Route Safe Point Return (`RTL_TYPE=6`) must perform complex geometric projections. To find the safest branch-off point, `MissionRoutePlanner` must rapidly scan every segment of the mission against every safe point. Mission resume rejoin uses the same geometry scan when it needs to branch back into the route after a GoTo, a manual reposition, or an RTL type 6 branch-off. Doing this with a 5-item sliding window would trigger thousands of synchronous SD card reads, completely locking up the flight controller.
 
-To solve this, the RTL orchestrator pre-loads the entire mission (up to `CONFIG_RTL_MISSION_CACHE_SIZE`, default 300) into a dedicated large RAM cache when the mode activates.
+To solve this, Navigator maintains a shared `MissionRouteCache` in RAM. It owns three caches and the asynchronous safe-point dataman state machine:
 
 ```
-Mission on SD Card:  [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ][ 5 ][ 6 ][ 7 ]...[ 299 ]
-                       │    │    │    │    │    │    │    │        │
-                       ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼        ▼
-RAM Cache (300):     [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ][ 5 ][ 6 ][ 7 ]...[ 299 ]
-                       ▲                                           ▲
-                       └─── entire mission loaded on activation ───┘
-                            instant random access by any index
+Mission / RTL
+   │
+   ├─ uses MissionRoutePlanner (stateless geometry scan)
+   │
+   └─ uses MissionRouteCache
+        ├─ full mission route cache      [0 ... CONFIG_RTL_MISSION_CACHE_SIZE-1]
+        ├─ safe-point cache              [all rally / safe points]
+        ├─ mission-land item cache       [current mission land item]
+        └─ safe-point stats reader       [DM_KEY_SAFE_POINTS_STATE async state machine]
 ```
+
+The full-mission cache is shared by Mission resume and RTL type 6. The safe-point and mission-land caches are also shared, which means RTL no longer needs its own parallel provider wrapper or duplicated dataman state machine.
 
 #### The Bridge (loadMissionItemFromCache Override)
 
@@ -298,8 +308,8 @@ RAM Cache (300):     [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ][ 5 ][ 6 ][ 7 ]...[ 299 ]
 
 This design allows each subclass to supply its own storage backend through a single override.
 
-- **Standard Mission mode** calls the base `MissionBase::loadMissionItemFromCache()`, which safely uses the 5-item sliding window.
-- **RtlMissionSafePointFollow** overrides `loadMissionItemFromCache()` to pull instantly from the RTL orchestrator's large pre-loaded cache.
+- **Standard Mission mode** still uses the base `MissionBase::loadMissionItemFromCache()` and its 5-item sliding window for normal mission execution. When Mission mode is activated while the vehicle is off-route, it uses the shared full-mission route cache plus `MissionRoutePlanner::collectVehicleProjection()` to build a temporary branch-in waypoint before resuming the real mission item.
+- **RtlMissionSafePointFollow** overrides `loadMissionItemFromCache()` to pull instantly from the same shared full-mission route cache, while safe-point and mission-land access also come from `MissionRouteCache`.
 
 This means the same traversal code in `MissionBase` works correctly for both modes without any code duplication or mode-specific branching.
 
