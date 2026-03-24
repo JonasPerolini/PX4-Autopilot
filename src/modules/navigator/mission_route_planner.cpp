@@ -779,6 +779,14 @@ bool MissionRoutePlanner::clampMissionIndex(int32_t &mission_index) const
 bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_position, int32_t mission_index,
 		const Config &config, ProjectionContext &projection_context, FailureReason *failure_reason) const
 {
+	if (!vehicle_position.valid()) {
+		if (failure_reason != nullptr) {
+			*failure_reason = FailureReason::NoValidGlobalPos;
+		}
+
+		return false;
+	}
+
 	const int32_t requested_mission_index = mission_index;
 
 	if (!clampMissionIndex(mission_index)) {

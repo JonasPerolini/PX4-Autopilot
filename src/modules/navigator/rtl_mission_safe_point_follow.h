@@ -63,6 +63,8 @@ public:
 	void setRoutePlan(const MissionRoutePlanner::Plan &plan) override;
 
 private:
+	friend class RtlMissionSafePointFollowTestPeer;
+
 	enum class Stage {
 		Idle = 0,                /**< No active SRP plan. */
 		FollowRoute,             /**< Follow the mission geometry in nominal or reverse direction. */

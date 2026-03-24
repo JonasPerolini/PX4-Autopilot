@@ -84,7 +84,7 @@ TEST_F(RtlProjectionTest, PrefersCurrentMissionSegment)
 }
 
 // WHY: A negative or out-of-range mission index should be clamped rather than causing undefined behavior.
-// WHAT: Pass various out-of-range indices, verify they all produce the same result as index 0.
+// WHAT: Negative indices clamp to the route start and overly large indices clamp to the route end.
 // NOTE: Uses TEST_P to independently test each invalid index value.
 class RtlProjectionClampTest : public MissionRoutePlannerTestBase, public ::testing::WithParamInterface<int> {};
 
@@ -92,7 +92,7 @@ TEST_P(RtlProjectionClampTest, ClampsOutOfRangeMissionIndex)
 {
 	const int bad_index = GetParam();
 
-	// GIVEN: 3-wp mission, vehicle at offset (100N, 60E)
+	// GIVEN: A 3-waypoint L-shaped mission and a vehicle near the final segment.
 	std::vector<mission_item_s> mission = {
 		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
@@ -104,24 +104,51 @@ TEST_P(RtlProjectionClampTest, ClampsOutOfRangeMissionIndex)
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 60.f, kAlt);
 
 	MissionRoutePlanner::ProjectionContext ctx_bad{};
-	MissionRoutePlanner::ProjectionContext ctx_zero{};
+	MissionRoutePlanner::ProjectionContext ctx_reference{};
+	const int reference_index = (bad_index < 0) ? 0 : static_cast<int>(mission.size()) - 1;
 
-	// WHEN: project with the bad index and with index 0
-	bool ok_bad  = planner.collectVehicleProjection(vehicle, bad_index, config, ctx_bad, &reason);
-	bool ok_zero = planner.collectVehicleProjection(vehicle, 0, config, ctx_zero, &reason);
+	// WHEN: Projection runs with the invalid index and with the corresponding clamped reference index.
+	bool ok_bad = planner.collectVehicleProjection(vehicle, bad_index, config, ctx_bad, &reason);
+	bool ok_reference = planner.collectVehicleProjection(vehicle, reference_index, config, ctx_reference, &reason);
 
-	// THEN: both succeed and produce the same segment indices
+	// THEN: The invalid index behaves exactly like the clamped mission boundary.
 	ASSERT_TRUE(ok_bad);
-	ASSERT_TRUE(ok_zero);
-	EXPECT_EQ(ctx_bad.seg_candidate.segment.start.idx, ctx_zero.seg_candidate.segment.start.idx);
-	EXPECT_EQ(ctx_bad.seg_candidate.segment.end.idx, ctx_zero.seg_candidate.segment.end.idx);
+	ASSERT_TRUE(ok_reference);
+	EXPECT_EQ(ctx_bad.seg_candidate.segment.start.idx, ctx_reference.seg_candidate.segment.start.idx);
+	EXPECT_EQ(ctx_bad.seg_candidate.segment.end.idx, ctx_reference.seg_candidate.segment.end.idx);
 }
 
 INSTANTIATE_TEST_SUITE_P(
 	InvalidIndices,
 	RtlProjectionClampTest,
-	::testing::Values(-42, -1, 0)
+	::testing::Values(-42, -1, 99)
 );
+
+
+// WHY: Reverse route following changes which segment owns a boundary mission index.
+// WHAT: Vehicle on the waypoint-1 corner with mission_index=1 should map to [1-2] when flying in reverse.
+TEST_F(RtlProjectionTest, ReverseFlightPrefersReverseCurrentSegment)
+{
+	// GIVEN: 3-wp L-shaped mission and reverse-flight configuration.
+	std::vector<mission_item_s> mission = {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+	};
+	VectorProvider provider(mission, {});
+	MissionRoutePlanner planner(provider);
+	config.is_flying_reverse = true;
+
+	const MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 10.f, kAlt);
+
+	// WHEN: collectVehicleProjection is called at the segment boundary.
+	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
+
+	// THEN: The reverse-owned segment [1-2] is selected.
+	ASSERT_TRUE(ok);
+	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 1);
+	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 2);
+}
 
 // WHY: When the vehicle was last flying a DO_JUMP loop segment, the planner should prefer that segment even if another non-loop segment is closer.
 // WHAT: Vehicle at (75N, 10E) with stored loop context [2->0], verify loop segment is selected.
@@ -162,161 +189,60 @@ TEST_F(RtlProjectionTest, PrefersStoredLoopAnchor)
 // GROUP 2: Default dataset - vehicle projection at various positions
 // ============================================================================
 
-// WHY: With real GPS coordinates, the planner should still prefer the mission-index segment.
-// WHAT: Vehicle near seg [1-2], mission_index=2 -> projects onto [1-2].
-TEST_F(RtlProjectionTest, DefaultMission_OnCurrentSegment)
+struct ProjectionDatasetCase {
+	const char *name;
+	bool use_corner_dataset;
+	double lat;
+	double lon;
+	float alt;
+	int mission_index;
+	int expected_start_idx;
+	int expected_end_idx;
+};
+
+class RtlProjectionDatasetTest : public MissionRoutePlannerTestBase,
+	public ::testing::WithParamInterface<ProjectionDatasetCase> {};
+
+// WHY: Dataset-driven projection checks all exercise the same contract and are easier to maintain
+//      when their geometry is captured as explicit scenarios instead of duplicated test bodies.
+// WHAT: Each named dataset scenario projects onto the expected route segment.
+TEST_P(RtlProjectionDatasetTest, SelectsExpectedSegment)
 {
-	// GIVEN: default dataset mission, vehicle near segment [1-2]
-	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
+	// GIVEN: A named projection scenario on either the default or corner dataset.
+	const ProjectionDatasetCase &scenario = GetParam();
+	const auto mission = scenario.use_corner_dataset ? corner_dataset::mission() : default_dataset::mission();
+	const auto safe_points = scenario.use_corner_dataset ? corner_dataset::safePoints() : default_dataset::safePoints();
+	VectorProvider provider(mission, safe_points);
 	MissionRoutePlanner planner(provider);
+	const MissionRoutePlanner::Position vehicle = makePositionAbsolute(scenario.lat, scenario.lon, scenario.alt);
 
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
+	// WHEN: collectVehicleProjection is called for the scenario mission index.
+	bool ok = planner.collectVehicleProjection(vehicle, scenario.mission_index, config, ctx, &reason);
 
-	// WHEN: project with mission_index=2
-	bool ok = planner.collectVehicleProjection(vehicle, 2, config, ctx, &reason);
-
-	// THEN: projects onto segment [1-2]
+	// THEN: The expected route segment is selected.
 	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 1);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 2);
+	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, scenario.expected_start_idx);
+	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, scenario.expected_end_idx);
 }
 
-// WHY: When the vehicle is clearly on the segment matching its mission index, projection should match.
-// WHAT: Vehicle on segment [0-1], mission_index=1.
-TEST_F(RtlProjectionTest, DefaultMission_OnSameSegment)
+INSTANTIATE_TEST_SUITE_P(
+	DatasetScenarios,
+	RtlProjectionDatasetTest,
+	::testing::Values(
+		ProjectionDatasetCase{"DefaultOnCurrentSegment", false, 46.10508903154495, 2.302372024012729, 463.0f, 2, 1, 2},
+		ProjectionDatasetCase{"DefaultOnSameSegment", false, 46.098944316424465, 2.2977800821792327, 475.6f, 1, 0, 1},
+		ProjectionDatasetCase{"DefaultFrontBackDifferentSegment", false, 46.10795279737903, 2.299475977516394, 454.4f, 5, 4, 5},
+		ProjectionDatasetCase{"DefaultCoincidingSegments", false, 46.11174050459439, 2.2876843642852362, 475.9f, 8, 7, 8},
+		ProjectionDatasetCase{"DefaultAtRouteEnd", false, 46.112843317707494, 2.3059421291432525, 455.4f, 15, 14, 15},
+		ProjectionDatasetCase{"CornerOnSeg1To2", true, 46.103348739288705, 2.3235968076446945, 479.7f, 2, 1, 2},
+		ProjectionDatasetCase{"CornerOnSeg4To5", true, 46.10205080248656, 2.318838207366314, 462.1f, 5, 4, 5},
+		ProjectionDatasetCase{"CornerOnSmallSegment", true, 46.10361319095525, 2.3183349874167636, 462.6f, 13, 12, 13}
+	),
+	[](const ::testing::TestParamInfo<ProjectionDatasetCase> &param_info)
 {
-	// GIVEN: default dataset mission, vehicle on segment [0-1]
-	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.098944316424465, 2.2977800821792327, 475.6f);
-
-	// WHEN: project with mission_index=1
-	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
-
-	// THEN: projects onto segment [0-1]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 0);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 1);
+	return param_info.param.name;
 }
-
-// WHY: Vehicle near a segment different from its mission index should still project correctly.
-// WHAT: Vehicle near seg [4-5], mission_index=5.
-TEST_F(RtlProjectionTest, DefaultMission_FrontBackDifferentSegment)
-{
-	// GIVEN: default dataset mission, vehicle near segment [4-5]
-	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10795279737903, 2.299475977516394, 454.4f);
-
-	// WHEN: project with mission_index=5
-	bool ok = planner.collectVehicleProjection(vehicle, 5, config, ctx, &reason);
-
-	// THEN: projects onto segment [4-5]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 4);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 5);
-}
-
-// WHY: When the route doubles back (segments [7-8] and [11-12] run roughly parallel), the planner must use mission_index to disambiguate.
-// WHAT: Vehicle near overlapping segments, mission_index=8. Expect seg [7-8].
-TEST_F(RtlProjectionTest, DefaultMission_CoincidingSegments)
-{
-	// GIVEN: default dataset mission, vehicle near coinciding segments
-	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.11174050459439, 2.2876843642852362, 475.9f);
-
-	// WHEN: project with mission_index=8
-	bool ok = planner.collectVehicleProjection(vehicle, 8, config, ctx, &reason);
-
-	// THEN: projects onto segment [7-8] (not [11-12])
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 7);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 8);
-}
-
-// WHY: Projection near the last mission segment must work correctly at the route boundary.
-// WHAT: Vehicle near seg [14-15], mission_index=15. Expect seg [14-15].
-TEST_F(RtlProjectionTest, DefaultMission_AtRouteEnd)
-{
-	// GIVEN: default dataset mission, vehicle near the final segment
-	VectorProvider provider(default_dataset::mission(), default_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.112843317707494, 2.3059421291432525, 455.4f);
-
-	// WHEN: project with mission_index=15
-	bool ok = planner.collectVehicleProjection(vehicle, 15, config, ctx, &reason);
-
-	// THEN: projects onto segment [14-15]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 14);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 15);
-}
-
-// ============================================================================
-// GROUP 3: Corner dataset - vehicle projection
-// ============================================================================
-
-// WHY: Validates projection near a corner waypoint selects the correct segment.
-// WHAT: Vehicle at corner location, mission_index=2. Expect seg [1-2].
-TEST_F(RtlProjectionTest, CornerMission_OnSeg1To2)
-{
-	// GIVEN: corner dataset mission, vehicle near segment [1-2]
-	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.103348739288705, 2.3235968076446945, 479.7f);
-
-	// WHEN: project with mission_index=2
-	bool ok = planner.collectVehicleProjection(vehicle, 2, config, ctx, &reason);
-
-	// THEN: projects onto segment [1-2]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 1);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 2);
-}
-
-// WHY: Validates projection after a VTOL transition command on a different segment.
-// WHAT: Vehicle near seg [4-5], mission_index=5. Expect seg [4-5].
-TEST_F(RtlProjectionTest, CornerMission_OnSeg4To5)
-{
-	// GIVEN: corner dataset mission, vehicle near segment [4-5]
-	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10205080248656, 2.318838207366314, 462.1f);
-
-	// WHEN: project with mission_index=5
-	bool ok = planner.collectVehicleProjection(vehicle, 5, config, ctx, &reason);
-
-	// THEN: projects onto segment [4-5]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 4);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 5);
-}
-
-// WHY: Segment [12-13] is only ~14m long; projection must still work on very short segments.
-// WHAT: Vehicle near the small segment, mission_index=13. Expect seg [12-13].
-TEST_F(RtlProjectionTest, CornerMission_OnSmallSegment)
-{
-	// GIVEN: corner dataset mission, vehicle near tiny segment [12-13]
-	VectorProvider provider(corner_dataset::mission(), corner_dataset::safePoints());
-	MissionRoutePlanner planner(provider);
-
-	MissionRoutePlanner::Position vehicle = makePositionAbsolute(46.10361319095525, 2.3183349874167636, 462.6f);
-
-	// WHEN: project with mission_index=13
-	bool ok = planner.collectVehicleProjection(vehicle, 13, config, ctx, &reason);
-
-	// THEN: projects onto segment [12-13]
-	ASSERT_TRUE(ok);
-	EXPECT_EQ(ctx.seg_candidate.segment.start.idx, 12);
-	EXPECT_EQ(ctx.seg_candidate.segment.end.idx, 13);
-}
+);
 
 // ============================================================================
 // GROUP 4: Candidate buffer and local-minimum detection
@@ -521,24 +447,29 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
-	// THEN: selection found despite duplicate corner waypoints
-	EXPECT_TRUE(selection.found);
+	// THEN: The real non-corner branch-off candidate survives the duplicate corner stack.
+	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(selection.safe_point_index, 0);
+	EXPECT_EQ(selection.branch_off_segment.start.idx, 9);
+	EXPECT_EQ(selection.branch_off_segment.end.idx, 10);
 }
 
 // ============================================================================
 // GROUP 5: Edge cases and error handling
 // ============================================================================
 
-// WHY: NaN and Infinity coordinates should cause projection to fail gracefully rather than producing undefined results.
-// WHAT: Pass NaN, +Infinity, and -Infinity for latitude and longitude. collectVehicleProjection should return false.
-class RtlProjectionInvalidCoordTest : public MissionRoutePlannerTestBase,
+// WHY: Projection should reject both non-finite and finite-but-invalid global positions early.
+// WHAT: Invalid coordinates return false with FailureReason::NoValidGlobalPos.
+class RtlProjectionInvalidVehiclePositionTest : public MissionRoutePlannerTestBase,
 	public ::testing::WithParamInterface<std::pair<double, double>> {};
 
-TEST_P(RtlProjectionInvalidCoordTest, InvalidVehiclePositionFails)
+TEST_P(RtlProjectionInvalidVehiclePositionTest, RejectsInvalidVehiclePosition)
 {
 	const auto [lat, lon] = GetParam();
 
-	// GIVEN: simple 3-wp mission
+	// GIVEN: A simple 3-wp mission.
 	std::vector<mission_item_s> mission = {
 		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
@@ -547,27 +478,35 @@ TEST_P(RtlProjectionInvalidCoordTest, InvalidVehiclePositionFails)
 	VectorProvider provider(mission, {});
 	MissionRoutePlanner planner(provider);
 
-	// WHEN: vehicle with invalid coordinate
+	// WHEN: collectVehicleProjection is called with an invalid vehicle position.
 	MissionRoutePlanner::Position vehicle{};
 	vehicle.lat = lat;
 	vehicle.lon = lon;
 	vehicle.alt = kAlt;
 	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
 
-	// THEN: projection fails
+	// THEN: Projection fails before any segment selection occurs.
 	EXPECT_FALSE(ok);
+	EXPECT_EQ(reason, MissionRoutePlanner::FailureReason::NoValidGlobalPos);
 }
 
 INSTANTIATE_TEST_SUITE_P(
-	InvalidCoordinates,
-	RtlProjectionInvalidCoordTest,
+	InvalidVehiclePositions,
+	RtlProjectionInvalidVehiclePositionTest,
 	::testing::Values(
-		std::make_pair(NAN, kBaseLon),                    // NaN latitude
-		std::make_pair(kBaseLat, NAN),                    // NaN longitude
-		std::make_pair(INFINITY, kBaseLon),               // +Infinity latitude
-		std::make_pair(kBaseLat, INFINITY),               // +Infinity longitude
-		std::make_pair(-INFINITY, kBaseLon),              // -Infinity latitude
-		std::make_pair(kBaseLat, -INFINITY)               // -Infinity longitude
+		std::make_pair(NAN, kBaseLon),
+		std::make_pair(kBaseLat, NAN),
+		std::make_pair(INFINITY, kBaseLon),
+		std::make_pair(kBaseLat, INFINITY),
+		std::make_pair(-INFINITY, kBaseLon),
+		std::make_pair(kBaseLat, -INFINITY),
+		std::make_pair(0.0, 0.0),
+		std::make_pair(90.0, kBaseLon),
+		std::make_pair(-90.0, kBaseLon),
+		std::make_pair(kBaseLat, 180.0),
+		std::make_pair(kBaseLat, -180.0),
+		std::make_pair(91.0, kBaseLon),
+		std::make_pair(kBaseLat, 181.0)
 	)
 );
 
@@ -621,6 +560,10 @@ TEST_F(RtlProjectionTest, ZigzagMissionStressesCandidateBuffer)
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
-	// THEN: selection found despite many local minima stressing the buffer
+	// THEN: The closest central segment survives the candidate pruning.
 	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.safe_point_index, 0);
+	EXPECT_EQ(selection.branch_off_segment.start.idx, 4);
+	EXPECT_EQ(selection.branch_off_segment.end.idx, 5);
 }

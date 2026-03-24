@@ -176,6 +176,71 @@ TEST_F(RtlSafePointTest, ReturnsEmptyWhenAllSafePointsInvalid)
 	EXPECT_FALSE(selection.found);
 }
 
+// WHY: Relative-altitude rally points must be converted to AMSL using home altitude before planning.
+// WHAT: A GLOBAL_RELATIVE_ALT safe point uses home_altitude_amsl for the selected goal altitude.
+TEST_F(RtlSafePointTest, RelativeAltitudeSafePointUsesHomeAltitude)
+{
+	// GIVEN: A straight mission and one rally point stored in relative-altitude frame.
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 90.f, 15.f, 40.f, NAV_FRAME_GLOBAL_RELATIVE_ALT),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	MissionRoutePlanner planner{provider};
+	config.home_altitude_amsl = 620.f;
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+
+	// WHEN: The vehicle projects onto the route and selects the rally point.
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+
+	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
+
+	// THEN: The selected goal altitude is converted from relative altitude to AMSL.
+	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.safe_point_index, 0);
+	EXPECT_NEAR(selection.goal_position.alt, 660.f, kAltitudeTolerance);
+	EXPECT_NEAR(selection.safe_point_position.alt, 660.f, kAltitudeTolerance);
+}
+
+// WHY: Relative-altitude rally points are invalid without a finite home altitude reference.
+// WHAT: A GLOBAL_RELATIVE_ALT safe point is rejected when home_altitude_amsl is not finite.
+TEST_F(RtlSafePointTest, RelativeAltitudeSafePointRequiresFiniteHomeAltitude)
+{
+	// GIVEN: The same mission geometry but without a valid home altitude reference.
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 90.f, 15.f, 40.f, NAV_FRAME_GLOBAL_RELATIVE_ALT),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	MissionRoutePlanner planner{provider};
+	config.home_altitude_amsl = NAN;
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+
+	// WHEN: The planner evaluates the safe point without a valid AMSL reference.
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+
+	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
+
+	// THEN: The relative-altitude safe point is skipped instead of producing a bogus altitude.
+	EXPECT_FALSE(selection.found);
+	EXPECT_FALSE(selection.safe_point_found);
+}
+
 // ============================================================================
 // GROUP 2: Default dataset - MC selection
 // ============================================================================
@@ -376,6 +441,50 @@ TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 	EXPECT_FALSE(selection.path.direction_reversed);
 }
 
+// WHY: A VTOL already transitioning to fixed-wing must use the same u-turn penalty logic as FW.
+// WHAT: vehicle_in_transition_to_fw selects the forward rally just like a fixed-wing vehicle.
+TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
+{
+	// GIVEN: The same straight mission geometry used to verify the FW u-turn penalty.
+	std::vector<mission_item_s> mission{
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	MissionRoutePlanner planner{provider};
+	config = defaultConfig();
+	config.is_multicopter = false;
+	config.vehicle_in_transition_to_fw = true;
+	config.u_turn_penalty_m = 4000.f;
+	config.vehicle_velocity_valid = true;
+	config.vehicle_velocity_north = 15.f;
+	config.vehicle_velocity_east = 0.f;
+
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+
+	// WHEN: The planner evaluates a vehicle that is already committed to a front transition.
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+
+	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
+
+	// THEN: The planner applies FW-style u-turn avoidance and keeps the forward rally.
+	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.safe_point_index, 1);
+	EXPECT_FALSE(selection.path.direction_reversed);
+	EXPECT_FALSE(selection.path.u_turn_required);
+}
+
 // WHY: MC has no u-turn penalty, so it should always pick the closest rally regardless of direction.
 // WHAT: MC picks rally A (index 0, reverse, closer) for the same geometry as FWUturnPenalty test.
 TEST_F(RtlSafePointTest, MCNoUturnPenaltySelectsClosestReverse)
@@ -443,8 +552,8 @@ TEST_F(RtlSafePointTest, CornerMission_RallyOnCorner_MC)
 	EXPECT_TRUE(selection.path.direction_reversed);
 }
 
-// WHY: FW must handle corner projections properly and find a valid safe point.
-// WHAT: FW finds a safe point; if rally 0 is selected, branch_off is on segment [4-5].
+// WHY: FW corner handling must stay deterministic because the branch-off segment feeds the executor.
+// WHAT: FW selects rally 2 and branches off on segment [2-4] across the FW corner transition.
 TEST_F(RtlSafePointTest, CornerMission_CornerProjectionHandled_FW)
 {
 	// GIVEN: Corner mission, FW config. Same vehicle position as CornerMission_RallyOnCorner_MC.
@@ -463,14 +572,15 @@ TEST_F(RtlSafePointTest, CornerMission_CornerProjectionHandled_FW)
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
-	// THEN: A safe point is found. If rally 0, branch_off is on [4-5]; direction is forward.
+	// THEN: Rally 2 is selected with the expected forward branch-off geometry.
 	ASSERT_TRUE(selection.found);
-
-	if (selection.safe_point_index == 0) {
-		EXPECT_EQ(selection.branch_off_segment.start.idx, 4);
-		EXPECT_EQ(selection.branch_off_segment.end.idx, 5);
-		EXPECT_FALSE(selection.path.direction_reversed);
-	}
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(selection.safe_point_index, 2);
+	EXPECT_EQ(selection.branch_off_segment.start.idx, 2);
+	EXPECT_EQ(selection.branch_off_segment.end.idx, 4);
+	EXPECT_TRUE(selection.branch_off_projection.valid());
+	EXPECT_FALSE(selection.path.direction_reversed);
 }
 
 // WHY: Rally points whose loop-segment candidate would create an invalid path must be excluded.
@@ -521,9 +631,9 @@ TEST_F(RtlSafePointTest, CornerMission_SmallSegmentFront_MC)
 	EXPECT_EQ(selection.safe_point_index, 5);
 }
 
-// WHY: Rally 0 should project onto segment [4-5] and not onto a corner artifact.
-// WHAT: If rally 0 is selected, branch_off is on segment [4-5].
-TEST_F(RtlSafePointTest, CornerMission_Rally0ProjectedOntoCornerWp4)
+// WHY: Reverse-flight corner selection must stay deterministic across the 5->7 leg near the MC transition.
+// WHAT: The reverse corner scenario selects rally 2 and branches off on segment [5-7].
+TEST_F(RtlSafePointTest, CornerMission_ReverseCornerScenarioSelectsRally2OnSegment5To7)
 {
 	// GIVEN: Corner mission, MC config. Vehicle at mission_index=5 flying reverse.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
@@ -540,18 +650,19 @@ TEST_F(RtlSafePointTest, CornerMission_Rally0ProjectedOntoCornerWp4)
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
-	// THEN: If rally 0 is selected, it should branch off on segment [4-5].
+	// THEN: Rally 2 is selected and its branch-off stays anchored on segment [5-7].
 	ASSERT_TRUE(selection.found);
-
-	if (selection.safe_point_index == 0) {
-		EXPECT_EQ(selection.branch_off_segment.start.idx, 4);
-		EXPECT_EQ(selection.branch_off_segment.end.idx, 5);
-	}
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(selection.safe_point_index, 2);
+	EXPECT_EQ(selection.branch_off_segment.start.idx, 5);
+	EXPECT_EQ(selection.branch_off_segment.end.idx, 7);
+	EXPECT_TRUE(selection.branch_off_projection.valid());
 }
 
-// WHY: Rally 6 near the stacked landing waypoint must project onto the correct segment.
-// WHAT: If rally 6 is selected, branch_off is on segment [14-15].
-TEST_F(RtlSafePointTest, CornerMission_Rally6ProjectedOnLandCorner)
+// WHY: The stacked landing corner is easy to regress because segment [14-15] has zero XY length.
+// WHAT: The land-corner scenario selects rally 5 and still branches off on segment [14-15].
+TEST_F(RtlSafePointTest, CornerMission_LandCornerScenarioSelectsRally5OnSegment14To15)
 {
 	// GIVEN: Corner mission, FW config. Vehicle near stacked landing at mission_index=13.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
@@ -569,13 +680,14 @@ TEST_F(RtlSafePointTest, CornerMission_Rally6ProjectedOnLandCorner)
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
-	// THEN: If rally 6 is selected, branch_off is on segment [14-15].
+	// THEN: Rally 5 is selected on the stacked landing segment rather than a neighboring corner.
 	ASSERT_TRUE(selection.found);
-
-	if (selection.safe_point_index == 6) {
-		EXPECT_EQ(selection.branch_off_segment.start.idx, 14);
-		EXPECT_EQ(selection.branch_off_segment.end.idx, 15);
-	}
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(selection.safe_point_index, 5);
+	EXPECT_EQ(selection.branch_off_segment.start.idx, 14);
+	EXPECT_EQ(selection.branch_off_segment.end.idx, 15);
+	EXPECT_TRUE(selection.branch_off_projection.valid());
 }
 
 // WHY: The DO_JUMP loop segment must be traversed correctly during safe-point selection.
@@ -679,6 +791,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_DefaultDataset)
 // WHAT: The closest safe point is masked out and the next allowed one is selected.
 TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
 {
+	// GIVEN: Two valid rally points where the closer one is masked out by the caller.
 	std::vector<mission_item_s> mission{
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
@@ -696,10 +809,12 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 	config.usable_safe_point_bitmask = 1ULL << 1;
 
+	// WHEN: Safe-point selection runs with only safe point 1 marked as usable.
 	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
+	// THEN: The masked-out closer candidate is skipped and safe point 1 is returned.
 	ASSERT_TRUE(selection.found);
 	EXPECT_TRUE(selection.safe_point_found);
 	EXPECT_EQ(selection.safe_point_index, 1);
@@ -710,6 +825,7 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
 // WHAT: Valid safe points with a zero mask return found=false.
 TEST_F(RtlSafePointTest, UsableSafePointBitmaskCanRejectAllSafePoints)
 {
+	// GIVEN: Two valid rally points with a usability bitmask that rejects every one of them.
 	std::vector<mission_item_s> mission{
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
@@ -727,10 +843,12 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskCanRejectAllSafePoints)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 	config.usable_safe_point_bitmask = 0;
 
+	// WHEN: Safe-point selection runs with no usable safe-point bits enabled.
 	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
+	// THEN: The planner reports that no safe-point destination is available.
 	EXPECT_FALSE(selection.found);
 }
 
@@ -921,6 +1039,7 @@ TEST_F(RtlSafePointTest, FWWithOrthogonalVelocityNoUturn)
 // WHAT: Vehicle on the corner_dataset loop area gets a valid plan with a safe point.
 TEST_F(RtlSafePointTest, VehicleInsideDoJumpLoopGetsValidPlan)
 {
+	// GIVEN: The vehicle is inside the active DO_JUMP loop and the planner knows the last flown loop edge.
 	auto items = corner_dataset::mission();
 	auto safe_points = corner_dataset::safePoints();
 	VectorProvider provider(items, safe_points);
@@ -940,18 +1059,26 @@ TEST_F(RtlSafePointTest, VehicleInsideDoJumpLoopGetsValidPlan)
 	config.last_flown_loop_segment.loops_remaining = 5;
 
 	MissionRoutePlanner::Plan plan{};
+
+	// WHEN: The planner builds a safe-point return from inside the loop.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, &reason);
 
+	// THEN: The plan remains loop-aware and produces a complete safe-point branch-off.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
 	EXPECT_TRUE(plan.valid());
+	EXPECT_TRUE(plan.projection_context.loop_ctx.valid());
 	EXPECT_TRUE(plan.selection.found);
+	EXPECT_TRUE(plan.selection.safe_point_found);
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_TRUE(plan.selection.branch_off_segment.valid());
+	EXPECT_TRUE(plan.selection.branch_off_projection.valid());
 }
 
-// WHY: The planner must handle the DO_JUMP loop edge correctly when computing along-route
-//      distances. A safe point near the loop must be reachable via the loop geometry.
-// WHAT: Safe point on jump segment 7→2 is selected when the vehicle is in the loop.
-TEST_F(RtlSafePointTest, SafePointOnDoJumpLoopSegmentIsReachable)
+// WHY: Loop planning must remain deterministic even when the cheapest safe point is reached via a nominal segment.
+// WHAT: The loop scenario selects rally 3 and branches off on nominal segment [7-9].
+TEST_F(RtlSafePointTest, LoopScenarioSelectsRally3OnSegment7To9)
 {
+	// GIVEN: A safe point lies on the active jump segment 7->2 while the vehicle is inside that loop.
 	auto items = corner_dataset::mission();
 	auto safe_points = corner_dataset::safePoints();
 	VectorProvider provider(items, safe_points);
@@ -971,16 +1098,23 @@ TEST_F(RtlSafePointTest, SafePointOnDoJumpLoopSegmentIsReachable)
 	config.last_flown_loop_segment.loops_remaining = 3;
 
 	MissionRoutePlanner::Plan plan{};
+
+	// WHEN: The planner evaluates a safe point that projects onto the loop edge itself.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, &reason);
 
+	// THEN: The planner chooses the cheapest reachable rally and keeps a valid nominal branch-off segment.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
+	EXPECT_TRUE(plan.projection_context.loop_ctx.valid());
 	EXPECT_TRUE(plan.selection.found);
-
-	if (plan.selection.safe_point_found) {
-		EXPECT_GE(plan.selection.safe_point_index, 0);
-		EXPECT_TRUE(plan.selection.safe_point_position.valid());
-		EXPECT_TRUE(plan.selection.branch_off_projection.valid());
-	}
+	EXPECT_TRUE(plan.selection.safe_point_found);
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(plan.selection.safe_point_index, 3);
+	EXPECT_TRUE(plan.selection.safe_point_position.valid());
+	EXPECT_TRUE(plan.selection.branch_off_projection.valid());
+	EXPECT_TRUE(plan.selection.branch_off_segment.valid());
+	EXPECT_FALSE(plan.selection.branch_off_segment.is_loop);
+	EXPECT_EQ(plan.selection.branch_off_segment.start.idx, 7);
+	EXPECT_EQ(plan.selection.branch_off_segment.end.idx, 9);
 }
 
 // WHY: A mission with an exhausted DO_JUMP (current_count == repeat_count) should be
@@ -988,6 +1122,7 @@ TEST_F(RtlSafePointTest, SafePointOnDoJumpLoopSegmentIsReachable)
 // WHAT: Planning succeeds and does not create loop context when DO_JUMP is exhausted.
 TEST_F(RtlSafePointTest, ExhaustedDoJumpTreatedAsStraightThrough)
 {
+	// GIVEN: A mission with a DO_JUMP whose current count already exhausted its repeats.
 	std::vector<mission_item_s> mission = {
 		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt + 20.f),
@@ -1011,15 +1146,63 @@ TEST_F(RtlSafePointTest, ExhaustedDoJumpTreatedAsStraightThrough)
 	config.vehicle_velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
+
+	// WHEN: The planner scans the route after the DO_JUMP has been exhausted.
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
 
+	// THEN: Planning stays on the nominal route and still returns a complete safe-point plan.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
 	EXPECT_TRUE(plan.valid());
 	EXPECT_FALSE(plan.projection_context.loop_ctx.valid());
+	EXPECT_TRUE(plan.selection.found);
+	EXPECT_TRUE(plan.selection.safe_point_found);
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(plan.selection.safe_point_index, 0);
+	EXPECT_TRUE(plan.selection.branch_off_segment.valid());
 }
 
 // =============================================================================
-// GROUP 8: Direct-to-safe-point shortcut (MC vs FW)
+// GROUP 8: Branch-Off Geometry
+// =============================================================================
+
+// WHY: closeToBranchOffSegment is pure branch geometry logic and should stay covered in a unit-style test.
+// WHAT: A point exactly on the returned branch-off leg is considered close to that leg.
+TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
+{
+	// GIVEN: A deterministic safe-point plan with a valid branch-off segment.
+	auto mission = std::vector<mission_item_s> {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt + 20.f),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 400.f, 0.f, kAlt + 30.f),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 600.f, 0.f, kAlt - 10.f),
+	};
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 50.f, kAlt + 10.f),
+	};
+	VectorProvider provider(mission, safe_points);
+	MissionRoutePlanner planner(provider);
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt + 10.f);
+	config = defaultConfig();
+	config.vehicle_velocity_north = 10.f;
+	config.vehicle_velocity_east = 0.f;
+	config.vehicle_velocity_valid = true;
+
+	MissionRoutePlanner::Plan plan{};
+
+	// WHEN: A safe-point plan is built and the cached branch-off leg is checked.
+	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
+
+	// THEN: The branch-off projection lies on the branch leg used by the executor.
+	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
+	ASSERT_TRUE(plan.selection.safe_point_found);
+	ASSERT_TRUE(plan.selection.branch_off_projection.valid());
+	EXPECT_TRUE(planner.closeToBranchOffSegment(plan.selection.branch_off_projection,
+			plan.selection, config.acceptance_radius));
+}
+
+// =============================================================================
+// GROUP 9: Direct-to-safe-point shortcut (MC vs FW)
 // =============================================================================
 
 // WHY: When a multicopter is very close to a safe point, the planner should select

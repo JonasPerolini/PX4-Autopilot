@@ -2,15 +2,15 @@
 
 This tool allows developers to visualize PX4 unit test mission data (Missions, Geofences, Rally Points, Bank Turn Scenarios, etc.) by pasting C++ code directly. It also includes a creator tab to generate C++ waypoint arrays by clicking on a map.
 
-It supports the MissionRoutePlanner helper functions defined in `MissionRoutePlannerTestHelpers.h`.
+It supports the MissionRoutePlanner helper functions defined in `test_RTL_helpers.h`.
 
 ## Setup & Running
 
 ### Prerequisites
 You need Python installed. Then install the required libraries:
 
-Version:
-- Streamlit, version 1.40.1
+Validated with:
+- Streamlit 1.40.1
 - Python 3.8.10
 
 ```bash

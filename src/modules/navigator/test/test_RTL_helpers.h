@@ -206,7 +206,7 @@ static inline mission_item_s makeLandItem(double lat, double lon, float alt)
 
 /** @brief Build a DO_JUMP item for loop handling tests. */
 static inline mission_item_s makeDoJump(int16_t jump_target_index, uint16_t repeat_count,
-					uint16_t current_count)
+					uint16_t current_count = 0)
 {
 	mission_item_s item{};
 	item.nav_cmd = NAV_CMD_DO_JUMP;
@@ -227,18 +227,18 @@ static inline mission_item_s makeVtolTransitionItem(uint8_t target_state)
 
 /** @brief Build a rally point from a local offset relative to the reference point. */
 static inline mission_item_s makeSafePointFromOffset(double base_lat, double base_lon,
-		float north_m, float east_m, float alt)
+		float north_m, float east_m, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
 {
 	mission_item_s item = makePositionItemFromOffset(base_lat, base_lon, north_m, east_m, alt, NAV_CMD_RALLY_POINT);
-	item.frame = NAV_FRAME_GLOBAL;
+	item.frame = frame;
 	return item;
 }
 
 /** @brief Build a rally point at absolute GPS coordinates. */
-static inline mission_item_s makeSafePointAbsolute(double lat, double lon, float alt)
+static inline mission_item_s makeSafePointAbsolute(double lat, double lon, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
 {
 	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_RALLY_POINT);
-	item.frame = NAV_FRAME_GLOBAL;
+	item.frame = frame;
 	return item;
 }
 
@@ -312,38 +312,3 @@ protected:
 	MissionRoutePlanner::ProjectionContext ctx{};
 	MissionRoutePlanner::FailureReason reason{};
 };
-
-// ============================================================================
-// Candidate / projection verification helpers
-// ============================================================================
-
-/** @brief Check if a candidate's projection is close to a waypoint corner (segment start or end). */
-static inline bool isCornerProjection(const MissionRoutePlanner::SegmentCandidate &candidate)
-{
-	auto close = [](double a, double b) {
-		return std::fabs(a - b) < MissionRoutePlanner::kCornerLatLonTolDeg;
-	};
-
-	bool at_start = close(candidate.projection.lat, candidate.segment_positions.start.lat)
-			&& close(candidate.projection.lon, candidate.segment_positions.start.lon);
-	bool at_end = close(candidate.projection.lat, candidate.segment_positions.end.lat)
-		      && close(candidate.projection.lon, candidate.segment_positions.end.lon);
-
-	return at_start || at_end;
-}
-
-/** @brief Check if a candidate buffer contains a specific segment. */
-static inline bool bufferContainsSegment(const MissionRoutePlanner::CandidateBuffer &buffer,
-		uint16_t start_idx, uint16_t end_idx)
-{
-	for (uint8_t i = 0; i < buffer.count; ++i) {
-		if (buffer.candidates[i].segment.start.idx == static_cast<int32_t>(start_idx) &&
-		    buffer.candidates[i].segment.end.idx == static_cast<int32_t>(end_idx)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-// end of pragma once guarded header
