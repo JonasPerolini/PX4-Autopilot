@@ -33,6 +33,7 @@ public:
 	bool loadSafePointItem(int index, mission_item_s &safe_point_item) const override;
 	bool getMissionLandItem(int32_t &index, mission_item_s &land_item) const override;
 	bool loadMissionItem(const mission_s &mission, int32_t index, mission_item_s &mission_item) const;
+	bool syncMissionItem(const mission_s &mission, int32_t index, const mission_item_s &mission_item);
 
 private:
 	enum class SafePointDatamanState {

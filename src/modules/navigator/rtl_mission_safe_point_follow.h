@@ -81,7 +81,16 @@ private:
 				    bool autocontinue, bool vtol_back_transition_required = false) const;
 	/** @brief Build the synthetic SRP landing item for safe-point landings and reverse takeoff fallback. */
 	void setLandMissionItem(mission_item_s &mission_item) const;
-	/** @brief Convert a position-bearing mission item into a pure geometric route waypoint. */
+
+	/** @brief Convert a position-bearing mission item into a pure geometric route waypoint.
+	 *
+	 * During route following, the mission is treated as geometry only.  Position-bearing items such as
+	 * NAV_CMD_LOITER_UNLIMITED, NAV_CMD_LOITER_TIME_LIMIT, and NAV_CMD_LOITER_TO_ALT are converted
+	 * to plain waypoints with autocontinue enabled and zero hold time so the vehicle keeps moving.
+	 * NAV_CMD_DELAY items are non-position and are naturally skipped by findNextPositionIndexNoJump(),
+	 * but if one were encountered it would also be clamped here.
+	 *
+	*/
 	void normalizeRouteMissionItem(mission_item_s &mission_item) const;
 	/** @brief Load the adjacent route position item in the currently selected traversal direction. */
 	bool loadAdjacentRouteItem(mission_item_s &mission_item, int32_t *adjacent_index = nullptr);
@@ -97,7 +106,8 @@ private:
 	void publishRouteItems(position_setpoint_triplet_s *pos_sp_triplet,
 			       const position_setpoint_s &current_setpoint_copy,
 			       const mission_item_s &current_mission_item,
-			       const mission_item_s *next_mission_item);
+			       const mission_item_s *next_mission_item,
+			       bool sync_active_mission_item = true);
 	/** @brief Publish SRP landing setpoints through MissionBase::handleLanding() to preserve legacy landing semantics. */
 	void publishLandingItems(position_setpoint_triplet_s *pos_sp_triplet,
 				 const position_setpoint_s &current_setpoint_copy,
@@ -114,4 +124,9 @@ private:
 	MissionRoutePlanner::Segment _last_flown_loop_segment{};
 	int32_t _transition_target_index{-1}; /**< Mission index that triggered the current in-flight transition. */
 	RtlTimeEstimator _rtl_time_estimator; /**< Time estimator consistent with other RTL modes. */
+
+	DEFINE_PARAMETERS_CUSTOM_PARENT(
+		RtlBase,
+		(ParamInt<px4::params::RTL_PLD_MD>) _param_rtl_pld_md
+	)
 };

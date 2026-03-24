@@ -7,9 +7,9 @@ Set [RTL_TYPE=6](../advanced_config/parameter_reference.md#RTL_TYPE) to enable i
 This mode is intended for operations where the mission itself is the safest known path through terrain, obstacles, or airspace constraints. Unlike direct RTL variants, it does not assume that the safest way home is a straight line.
 
 ::: info
-- If no [safety points (rally points)](../flying/plan_safety_points.md) can be selected, PX4 falls back to the closer mission endpoint (landing or takeoff) while staying in the route-based return logic.
+- If route planning succeeds but no [safety points (rally points)](../flying/plan_safety_points.md) are usable, PX4 falls back to the closer mission endpoint (landing or takeoff) while staying in the route-based return logic.
 - Regardless of the direction of flight, the vehicle skips `DO_JUMP` commands. Note however that the route planner evaluates jump segments to accurately project the vehicle segment.
-- If the mission itself cannot be projected, PX4 falls back to a direct return (RTL_TYPE=0 behavior).
+- If the mission cannot be projected, the route cache is not ready, or the mission exceeds `CONFIG_RTL_MISSION_CACHE_SIZE`, PX4 falls back to the same direct RTL destination selection used by `RTL_TYPE=3`.
 :::
 
 ## Setup and Configuration
@@ -27,6 +27,8 @@ Tuning parameters:
 | [MIS_FW_SEG_DIST](../advanced_config/parameter_reference.md#MIS_FW_SEG_DIST) | Extra cross-track search window for fixed-wing or VTOL-in-FW vehicle projection. |
 | [RTL_RP_SEG_DIST](../advanced_config/parameter_reference.md#RTL_RP_SEG_DIST) | Extra cross-track search window for safe-point projection. Increase if safe points are placed far from the mission route. |
 | [RTL_FW_UTURN_PEN](../advanced_config/parameter_reference.md#RTL_FW_UTURN_PEN) | U-turn distance penalty for fixed-wing and VTOL-in-FW safe-point scoring. Penalizes paths that require reversing direction. Set to 0 to disable. |
+| [RTL_APPR_FORCE](../advanced_config/parameter_reference.md#RTL_APPR_FORCE) | For VTOL in FW mode, only safe points with a valid VTOL approach are considered. |
+| [RTL_PLD_MD](../advanced_config/parameter_reference.md#RTL_PLD_MD) | Precision landing mode used for the synthetic safe-point landing item and the reverse-takeoff landing fallback. |
 | [NAV_ACC_RAD](../advanced_config/parameter_reference.md#NAV_ACC_RAD) | Affects join acceptance, branch-off acceptance, and the direct-to-safe-point shortcut. |
 
 ::: tip
@@ -42,8 +44,9 @@ When `RTL_TYPE=6` is evaluated, PX4 performs these steps:
 1. Project the vehicle onto the mission route.
 2. Project all safe points onto the mission route.
 3. Score the reachable safe-point projections by along-route cost.
-4. If no safe point is usable, fall back to the closer mission endpoint (takeoff or land).
-5. Build a route-join, route-follow, and branch-off plan from the result.
+4. If route planning succeeds but no safe point is usable, fall back to the closer mission endpoint (takeoff or land).
+5. If route planning itself cannot run, fall back to direct RTL destination selection.
+6. Build a route-join, route-follow, and branch-off plan from the selected result.
 
 ### Vehicle Projection
 
@@ -87,11 +90,12 @@ From the valid candidates, the system evaluates the travel path from each projec
  - Along-Route Distance: The distance along the mission route from the vehicle projection to the safe-point projection (branch-off point). This is measured along the route geometry with straight lines between waypoints.
  - U-turn Penalty: For Fixed-wing and VTOL-in-FW, a distance penalty ([RTL_FW_UTURN_PEN](../advanced_config/parameter_reference.md#RTL_FW_UTURN_PEN), default 4,000 m) is added to the cost if the path requires the vehicle to perform a U-turn. This prioritizes forward-flowing paths. Reduce the value for smaller airframes with tighter turn radii, or set to 0 to disable the penalty.
 
-Safe points are loaded once and evaluated in one batched route scan:
+Safe points are pre-filtered once before route scoring:
 
 - Valid safe points are read from the dataman store.
-- Invalid coordinates or unsupported frames are skipped.
-- Every valid safe point gets up to three local-minimum route projections.
+- Invalid coordinates, unsupported frames, or filtered safe points are skipped.
+- For VTOL in FW mode with [RTL_APPR_FORCE](../advanced_config/parameter_reference.md#RTL_APPR_FORCE)=1, only safe points with a valid VTOL landing approach remain eligible.
+- Every remaining valid safe point gets up to three local-minimum route projections.
 
 ### Direct-to-Safe-Point Shortcut
 
@@ -107,10 +111,12 @@ The cached plan is invalidated whenever the mission or safe-point data changes (
 
 ### Mission-Endpoint Fallback
 
-If no safe point can be selected, Route Safe Point Return falls back to the closest between:
+If route planning succeeds but no safe point can be selected, Route Safe Point Return falls back to the closest between:
 
 - The mission landing endpoint, flown in the nominal direction.
 - The mission takeoff endpoint, flown in reverse.
+
+If route planning itself cannot run, PX4 falls back to direct RTL destination selection instead of staying in the route-following executor.
 
 
 ## Execution Stages
@@ -171,7 +177,7 @@ The route planner caches the entire mission in RAM for non-blocking access durin
 
 **Missions within the cache limit** are fully cached on upload. The planner evaluates every segment and optimal safe-point selection is guaranteed.
 
-**Missions exceeding the cache limit** cannot use Route Safe Point Return. PX4 logs a warning and automatically falls back to the closest safe destination using direct-path RTL logic (`RTL_TYPE=3` behavior).
+**Missions exceeding the cache limit** cannot use Route Safe Point Return. PX4 logs a warning and automatically falls back to the same direct RTL destination selection used by `RTL_TYPE=3`.
 
 To increase the limit for a specific board, set the following in the board's `.px4board` file:
 
@@ -186,6 +192,9 @@ For most real-world operations, 300 waypoints is sufficient. If your mission req
 ## Current Limitations
 
 - Missions exceeding `CONFIG_RTL_MISSION_CACHE_SIZE` items (default 300) are not supported; PX4 falls back to direct-path RTL.
+- Safe-point scoring currently minimizes along-route distance only; it does not yet add the final branch-off leg from the mission route to the safe point into the cost.
+- If several safe points are already within the direct-to-safe-point shortcut radius, the first qualifying safe point in upload order is used.
+- Mission smart route rejoin does not yet perform a front-transition before resuming a fixed-wing segment; only the post-join back-transition path is implemented.
 - Geofence-aware pruning for vehicle and safe-point projections is not yet implemented.
 - No dedicated reverse-turn execution module: U-turns are penalized in path scoring but not executed as a specific maneuver.
 

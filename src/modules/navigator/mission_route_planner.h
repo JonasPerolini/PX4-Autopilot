@@ -61,9 +61,9 @@ public:
 	static constexpr double kCornerLatLonTolDeg{1e-5};
 	static constexpr uint8_t MAX_SEGMENT_CANDIDATES{3};
 	/**
-	 * Maximum safe points evaluated per planning cycle.
-	 * NOTE: RtlStatus.msg uses uint8_t for safe_point_index, so this must stay <= 255.
-	 * If raised above 255, the constrain() in rtl.cpp::setRtlTypeAndDestination will silently truncate.
+	 * Maximum safe points evaluated per planning pass.
+	 * NOTE: Config::usable_safe_point_bitmask uses one bit per safe point, so this must stay <= 64.
+	 * RtlStatus.msg also uses uint8_t for safe_point_index, so this must stay <= 255.
 	 */
 	static constexpr uint8_t MAX_SAFE_POINT_BATCH{64};
 
@@ -288,6 +288,7 @@ public:
 		bool vehicle_in_transition_to_fw{false};
 		float u_turn_penalty_m{4000.f};
 		Segment last_flown_loop_segment{};
+		uint64_t usable_safe_point_bitmask{~0ULL};
 	};
 
 	enum class FailureReason : uint8_t {
@@ -421,8 +422,8 @@ private:
 	/** @brief Find the position item attached to or preceding the given mission index. */
 	bool findAttachedValidPositionIndex(uint16_t start_index, float home_altitude_amsl,
 					    uint16_t &attached_position_index) const;
-	/** @brief Load all valid safe points once so the route can be scanned in a single batch. */
-	bool loadSafePointBatch(float home_altitude_amsl, SafePointBatch &batch) const;
+	/** @brief Load the valid safe points that fit in the single planner pass. */
+	void loadSafePointBatch(float home_altitude_amsl, const Config &config, SafePointBatch &batch) const;
 	/** @brief Clear all per-safe-point candidate buffers before running a new batch scan. */
 	void resetSafePointBatchResults(SafePointBatch &batch) const;
 	/** @brief Advance mission scanning state to the next position-bearing segment end. */

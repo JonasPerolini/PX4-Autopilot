@@ -147,6 +147,8 @@ public:
 	using MissionBase::VtolTransitionAction;
 	using MissionBase::findNextPositionIndexNoJump;
 	using MissionBase::findPreviousPositionIndexNoJump;
+	using MissionBase::getNextPositionItems;
+	using MissionBase::getPreviousPositionItems;
 	using MissionBase::updateLastFlownLoopSegmentForNominalAdvance;
 
 	void setCurrentSequence(int32_t index)
@@ -671,6 +673,51 @@ TEST_F(MissionBaseVtolTest, FindPreviousReturnsFalseWhenOnlyJumpsBefore)
 
 	int32_t prev = -1;
 	EXPECT_FALSE(mission_base->findPreviousPositionIndexNoJump(1, prev));
+}
+
+// WHY: getNextPositionItems is used by legacy Mission and mission-based RTL flows, so it must
+//      follow active DO_JUMP control flow rather than treating jumps as geometry-only.
+// WHAT: [WP0, WP1, DO_JUMP->0, WP3] starting from idx 2 returns WP0 then WP1.
+TEST_F(MissionBaseVtolTest, GetNextPositionItemsFollowsActiveDoJump)
+{
+	std::vector<mission_item_s> items = {
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+		makeDoJump(0, 2, 0),
+		makePositionItem(kLat + 0.002, kLon, kAlt),
+	};
+
+	mission_base->loadTestMission(items);
+
+	int32_t next_items[2] = {-1, -1};
+	size_t num_found_items = 0;
+	mission_base->getNextPositionItems(2, next_items, num_found_items, 2u);
+
+	ASSERT_EQ(num_found_items, 2u);
+	EXPECT_EQ(next_items[0], 0);
+	EXPECT_EQ(next_items[1], 1);
+}
+
+// WHY: getPreviousPositionItems is also shared legacy logic and must honor an active
+//      DO_JUMP when traversing backward through the mission flow.
+// WHAT: [WP0, WP1, DO_JUMP->0, WP3] starting from idx 3 returns WP0 as the previous item.
+TEST_F(MissionBaseVtolTest, GetPreviousPositionItemsFollowsActiveDoJump)
+{
+	std::vector<mission_item_s> items = {
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+		makeDoJump(0, 2, 0),
+		makePositionItem(kLat + 0.002, kLon, kAlt),
+	};
+
+	mission_base->loadTestMission(items);
+
+	int32_t previous_items[1] = {-1};
+	size_t num_found_items = 0;
+	mission_base->getPreviousPositionItems(3, previous_items, num_found_items, 1u);
+
+	ASSERT_EQ(num_found_items, 1u);
+	EXPECT_EQ(previous_items[0], 0);
 }
 
 // WHY: Projection-based replans must remember which active DO_JUMP edge the vehicle was flying

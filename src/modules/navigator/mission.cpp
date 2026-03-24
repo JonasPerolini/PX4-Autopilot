@@ -186,34 +186,29 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 
 	if (planner.collectVehicleProjection(vehicle_position, _mission.current_seq, config, projection_context,
 					     &failure_reason) == false) {
-		PX4_DEBUG("Mission route rejoin unavailable: %s", MissionRoutePlanner::failureReasonString(failure_reason));
+		PX4_ERR("Mission route rejoin unavailable: %s", MissionRoutePlanner::failureReasonString(failure_reason));
 		return false;
 	}
 
+	// mission is always flown in nominal direction, go to the segment end idx
 	const int32_t route_target_index = projection_context.seg_candidate.segment.end.idx;
 
 	if (route_target_index < 0 || route_target_index >= _mission.count) {
 		return false;
 	}
 
-	const int32_t previous_target_index = _mission.current_seq;
 	_last_flown_loop_segment = projection_context.seg_candidate.segment;
 	setMissionIndex(route_target_index);
 	_is_current_planned_mission_item_valid = isMissionValid();
 
-	const float distance_to_projection = get_distance_to_next_waypoint(global_position->lat, global_position->lon,
-					     projection_context.seg_candidate.projection.lat,
-					     projection_context.seg_candidate.projection.lon);
-
-	if ((PX4_ISFINITE(distance_to_projection) == false)
-	    || (distance_to_projection <= _navigator->get_acceptance_radius())) {
-		return previous_target_index != _mission.current_seq;
-	}
-
 	MissionRoutePlanner::JoinContext join_context{};
 	join_context.projection = projection_context.seg_candidate.projection;
-	setupJoinRoute(join_context, vtolTransitionActionForTarget(_mission.current_seq, false)
-		       == VtolTransitionAction::BackTransition);
+	const VtolTransitionAction join_transition_action = vtolTransitionActionForTarget(_mission.current_seq, false);
+
+	// TODO: support a front-transition before rejoining a fixed-wing segment. The shared
+	// transition helper can already detect this need, but Mission smart rejoin currently
+	// only implements the optional post-join back-transition path.
+	setupJoinRoute(join_context, join_transition_action == VtolTransitionAction::BackTransition);
 
 	mavlink_log_info(_navigator->get_mavlink_log_pub(), "Rejoining mission route\t");
 	return true;

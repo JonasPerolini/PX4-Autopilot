@@ -222,24 +222,22 @@ bool MissionRoutePlanner::findAttachedValidPositionIndex(uint16_t start_index, f
 	return false;
 }
 
-bool MissionRoutePlanner::loadSafePointBatch(float home_altitude_amsl, SafePointBatch &batch) const
+void MissionRoutePlanner::loadSafePointBatch(float home_altitude_amsl, const Config &config, SafePointBatch &batch) const
 {
 	batch = {};
 
-	const int safe_point_count = _provider.safePointCount();
+	const int safe_point_count = min(_provider.safePointCount(), static_cast<int>(MAX_SAFE_POINT_BATCH));
+	constexpr int usable_safe_point_bits = sizeof(config.usable_safe_point_bitmask) * 8;
 
-	if (safe_point_count <= 0) {
-		return false;
-	}
+	for (int safe_point_index = 0; safe_point_index < safe_point_count; ++safe_point_index) {
+		const uint64_t safe_point_bit = 1ULL << safe_point_index;
 
-	const int safe_point_limit = min(safe_point_count, static_cast<int>(MAX_SAFE_POINT_BATCH));
+		if (safe_point_index >= usable_safe_point_bits
+		    || !(config.usable_safe_point_bitmask & safe_point_bit)) {
+			PX4_DEBUG("RTL SRP safe point %d skipped by runtime filter", safe_point_index);
+			continue;
+		}
 
-	if (safe_point_count > safe_point_limit) {
-		PX4_WARN("RTL SRP safe point count %d exceeds batch limit %u, clamping",
-			 safe_point_count, static_cast<unsigned>(MAX_SAFE_POINT_BATCH));
-	}
-
-	for (int safe_point_index = 0; safe_point_index < safe_point_limit; ++safe_point_index) {
 		mission_item_s safe_point_item{};
 
 		if (!_provider.loadSafePointItem(safe_point_index, safe_point_item)) {
@@ -258,8 +256,6 @@ bool MissionRoutePlanner::loadSafePointBatch(float home_altitude_amsl, SafePoint
 		batch.items[batch.count].source_index = safe_point_index;
 		batch.count++;
 	}
-
-	return batch.count > 0;
 }
 
 void MissionRoutePlanner::resetSafePointBatchResults(SafePointBatch &batch) const
@@ -1220,10 +1216,17 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectSafePoint(const Projec
 	// TODO: implement geofence-aware pruning: reject safe points and vehicle projections
 	// that would require crossing a geofence boundary.
 
-	s_safe_point_batch = {};
+	const int safe_point_count = _provider.safePointCount();
 
-	if (!loadSafePointBatch(config.home_altitude_amsl, s_safe_point_batch)) {
+	if (safe_point_count <= 0) {
 		PX4_DEBUG("RTL SRP search: no safe points available");
+		return selection;
+	}
+
+	s_safe_point_batch = {};
+	loadSafePointBatch(config.home_altitude_amsl, config, s_safe_point_batch);
+
+	if (s_safe_point_batch.count == 0) {
 		return selection;
 	}
 

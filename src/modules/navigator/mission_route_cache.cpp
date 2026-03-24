@@ -126,6 +126,25 @@ bool MissionRouteCache::loadMissionItem(const mission_s &mission, int32_t index,
 	return isReady(mission) && loadMissionItem(index, mission_item);
 }
 
+bool MissionRouteCache::syncMissionItem(const mission_s &mission, int32_t index, const mission_item_s &mission_item)
+{
+	if (!isReady(mission) || index < 0 || index >= _mission_count) {
+		return false;
+	}
+
+	bool mission_updated = _dataman_cache_mission.updateCachedItem(static_cast<dm_item_t>(_mission_dataman_id), index,
+			       reinterpret_cast<const uint8_t *>(&mission_item), sizeof(mission_item));
+
+	bool land_updated = false;
+
+	if (index == _mission_land_index) {
+		land_updated = _dataman_cache_land_item.updateCachedItem(static_cast<dm_item_t>(_mission_land_dataman_id), index,
+				reinterpret_cast<const uint8_t *>(&mission_item), sizeof(mission_item));
+	}
+
+	return mission_updated || land_updated;
+}
+
 void MissionRouteCache::updateMissionCache(const mission_s &mission)
 {
 	const bool mission_changed = mission.mission_id != _mission_id

@@ -114,9 +114,10 @@ PARAM_DEFINE_FLOAT(RTL_MIN_DIST, 10.0f);
  * @value 3 Return via direct path to closest destination: home, start of mission landing pattern or safe point. If the destination is a mission landing pattern, follow the pattern to land.
  * @value 4 Return to the planned mission landing, or to home via the reverse mission path, whichever is closer by counting waypoints. Do not consider rally points.
  * @value 5 Return directly to safe landing point (do not consider mission landing and Home)
- * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Falls back to the closest mission endpoint (landing or takeoff) when no safe point is available. Requires the mission to fit within the board-configured cache (RTL_MISSION_CACHE_SIZE, default 300 items); larger missions fall back to direct RTL (type 3 behavior). Uses MIS_MC_SEG_DIST, MIS_FW_SEG_DIST, RTL_RP_SEG_DIST for vehicle projection search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
+ * @value 6 Return to the closest safe point by rejoining the uploaded mission route, following it to the optimal branch-off point, then leaving the route to land at the safe point. Within successful route planning, if no safe point is usable PX4 falls back to the closer mission endpoint (landing or takeoff). If route planning cannot run, PX4 falls back to direct RTL destination selection. Uses MIS_MC_SEG_DIST, MIS_FW_SEG_DIST, RTL_RP_SEG_DIST for vehicle projection search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
  * @group Return Mode
  */
+// TODO: restore the default RTL_TYPE to 0 before merging. It is temporarily set to 6 to simplify testing.
 PARAM_DEFINE_INT32(RTL_TYPE, 6);
 
 /**

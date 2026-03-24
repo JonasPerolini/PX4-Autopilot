@@ -210,6 +210,7 @@ private:
 	 */
 	loiter_point_s chooseBestLandingApproach(const land_approaches_s &vtol_land_approaches);
 
+
 	hrt_abstime _destination_check_time{0};
 
 	RtlBase *_rtl_mission_type_handle{nullptr};

@@ -251,7 +251,7 @@ void RtlMissionSafePointFollow::setWaypointMissionItem(mission_item_s &mission_i
 void RtlMissionSafePointFollow::setLandMissionItem(mission_item_s &mission_item) const
 {
 	mission_item = {};
-	mission_item.nav_cmd = _navigator->force_vtol() ? NAV_CMD_VTOL_LAND : NAV_CMD_LAND;
+	mission_item.nav_cmd = (_vehicle_status_sub.get().is_vtol || _navigator->force_vtol()) ? NAV_CMD_VTOL_LAND : NAV_CMD_LAND;
 	mission_item.lat = _plan.selection.goal_position.lat;
 	mission_item.lon = _plan.selection.goal_position.lon;
 
@@ -266,16 +266,11 @@ void RtlMissionSafePointFollow::setLandMissionItem(mission_item_s &mission_item)
 	}
 
 	mission_item.altitude_is_relative = false;
-	mission_item.land_precision = 2;
+	mission_item.land_precision = _param_rtl_pld_md.get();
 	mission_item.autocontinue = false;
 	mission_item.origin = ORIGIN_ONBOARD;
 }
 
-// During route following, the mission is treated as geometry only.  Position-bearing items such as
-// NAV_CMD_LOITER_UNLIMITED, NAV_CMD_LOITER_TIME_LIMIT, and NAV_CMD_LOITER_TO_ALT are converted
-// to plain waypoints with autocontinue enabled and zero hold time so the vehicle keeps moving.
-// NAV_CMD_DELAY items are non-position and are naturally skipped by findNextPositionIndexNoJump(),
-// but if one were encountered it would also be clamped here.
 void RtlMissionSafePointFollow::normalizeRouteMissionItem(mission_item_s &mission_item) const
 {
 	if (!item_contains_position(mission_item)) {
@@ -358,7 +353,7 @@ bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_it
 
 void RtlMissionSafePointFollow::publishRouteItems(position_setpoint_triplet_s *pos_sp_triplet,
 		const position_setpoint_s &current_setpoint_copy, const mission_item_s &current_mission_item,
-		const mission_item_s *next_mission_item)
+		const mission_item_s *next_mission_item, bool sync_active_mission_item)
 {
 	mission_item_to_position_setpoint(current_mission_item, &pos_sp_triplet->current);
 
@@ -375,12 +370,14 @@ void RtlMissionSafePointFollow::publishRouteItems(position_setpoint_triplet_s *p
 
 	issue_command(current_mission_item);
 
-	// Synchronize _mission_item with the published waypoint so that
-	// is_mission_item_reached_or_completed() checks the correct position.
-	// Without this, the reach check uses the raw dataman item (e.g. WP2) while
-	// the drone is actually flying to a virtual waypoint (e.g. branch-off projection
-	// on segment 1-2), causing the stage machine to stall or misbehave.
-	_mission_item = current_mission_item;
+	if (sync_active_mission_item) {
+		// Synchronize _mission_item with the published waypoint so that
+		// is_mission_item_reached_or_completed() checks the correct position.
+		// Without this, the reach check uses the raw dataman item (e.g. WP2) while
+		// the drone is actually flying to a virtual waypoint (e.g. branch-off projection
+		// on segment 1-2), causing the stage machine to stall or misbehave.
+		_mission_item = current_mission_item;
+	}
 
 	_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
 	reset_mission_item_reached();
@@ -494,6 +491,10 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 							_plan.selection.path.direction_reversed)
 					: VtolTransitionAction::None; // Already issued for this target.
 
+			const bool wait_for_route_transition = transition_action != VtolTransitionAction::None
+							       && _vehicle_status_sub.get().is_vtol
+							       && !_land_detected_sub.get().landed;
+
 			mission_item_s current_route_item = _mission_item;
 			const bool current_item_is_endpoint = _plan.selection.goal_type != MissionRoutePlanner::GoalType::SafePoint
 							      && isLandingCommand(_mission_item);
@@ -526,11 +527,10 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 				next_route_item_ptr = &next_route_item;
 			}
 
-			publishRouteItems(pos_sp_triplet, current_setpoint_copy, current_route_item, next_route_item_ptr);
+			publishRouteItems(pos_sp_triplet, current_setpoint_copy, current_route_item, next_route_item_ptr,
+					  !wait_for_route_transition);
 
-			if (transition_action != VtolTransitionAction::None
-			    && _vehicle_status_sub.get().is_vtol
-			    && !_land_detected_sub.get().landed) {
+			if (wait_for_route_transition) {
 				_transition_target_index = _mission.current_seq;
 				_stage = Stage::TransitionDuringRoute;
 
@@ -542,19 +542,25 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 
 				if (transition_action == VtolTransitionAction::FrontTransition) {
 					PX4_INFO("RTL SRP route applying FT");
-					transition_item.yaw = _navigator->get_local_position()->heading;
+					const auto *local_position = _navigator->get_local_position();
+
+					if ((local_position != nullptr) && PX4_ISFINITE(local_position->heading)) {
+						transition_item.yaw = local_position->heading;
+					}
 
 				} else {
 					PX4_INFO("RTL SRP route applying BT");
 				}
 
-				issue_command(transition_item);
+				_mission_item = transition_item;
+				issue_command(_mission_item);
 				pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
 
 				if (transition_action == VtolTransitionAction::BackTransition) {
 					pos_sp_triplet->previous.valid = false;
 				}
 
+				reset_mission_item_reached();
 				publish_navigator_mission_item();
 				_navigator->set_position_setpoint_triplet_updated();
 			}

@@ -58,7 +58,7 @@ At high level these are:
   If the destination is a mission landing pattern, follow the pattern to land.
 - [Closest mission-path return](#closest-mission-path-return-type-rtl-type-4) (`RTL_TYPE=4`): Choose whichever is closer by waypoint count: mission landing via the mission path or home via the reverse mission path.
 - [Direct safe point return](#direct-safe-point-return-type-rtl-type-5) (`RTL_TYPE=5`): Return directly to a safe point, ignoring home and mission landing destinations.
-- [Route safe point return](#route-safe-point-return-type-rtl-type-6) (`RTL_TYPE=6`): Rejoin the uploaded mission route, follow it to the best safe-point branch-off, and leave the route only at that projected branch-off point. If no safe point can be selected, PX4 falls back to the closer mission endpoint while staying in the route-based type-6 handler.
+- [Route safe point return](#route-safe-point-return-type-rtl-type-6) (`RTL_TYPE=6`): Rejoin the uploaded mission route, follow it to the best safe-point branch-off, and leave the route only at that projected branch-off point. If route planning succeeds but no safe point is usable, PX4 falls back to the closer mission endpoint. If route planning cannot run, PX4 falls back to direct RTL destination selection.
 
 More detailed explanations for each of the types are provided in the following sections.
 
@@ -171,9 +171,10 @@ If no valid safe point is available, PX4 falls back to the last known position w
 In this return type PX4 uses the uploaded mission geometry to reach a safe point:
 
 - The vehicle is projected onto the uploaded mission route rather than just the nearest waypoint.
-- All safe points are projected in one batched route scan and scored by the along-route path length from the vehicle projection to the safe-point branch-off.
+- Safe points are pre-filtered once in RTL and the remaining eligible points are scored by the along-route path length from the vehicle projection to the safe-point branch-off.
 - PX4 chooses the safe point with the shortest valid route-following return path, with multicopter direct-to-safe-point and cached branch-off reuse shortcuts.
-- If no safe point can be selected, PX4 falls back to the better mission endpoint: mission land in nominal direction or mission takeoff in reverse.
+- If route planning succeeds but no safe point can be selected, PX4 falls back to the better mission endpoint: mission land in nominal direction or mission takeoff in reverse.
+- If route planning cannot run, PX4 falls back to direct RTL destination selection instead of staying in the route-following type-6 handler.
 - The vehicle rejoins the route, follows it in nominal or reverse direction, replaces the active mission target with a virtual branch-off waypoint when needed, and then lands at the safe point.
 
 This mode is intended for operations where the mission path itself is the safest known corridor.

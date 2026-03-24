@@ -54,6 +54,9 @@ using matrix::wrap_pi;
 static constexpr float MAX_DIST_FROM_HOME_FOR_LAND_APPROACHES{10.0f}; // [m] We don't consider safe points valid if the distance from the current home to the safe point is smaller than this distance
 static constexpr float MIN_DIST_THRESHOLD = 2.f;
 
+static_assert(DM_KEY_SAFE_POINTS_MAX <= MissionRoutePlanner::MAX_SAFE_POINT_BATCH,
+	      "RTL safe-point bitmask must cover all uploaded safe points");
+
 // Named constants for RTL_TYPE parameter values (must match @value tags in rtl_params.c).
 static constexpr int RTL_TYPE_MISSION_FAST = 2;
 static constexpr int RTL_TYPE_MISSION_FAST_OR_REVERSE = 4;
@@ -373,6 +376,35 @@ void RTL::setRtlTypeAndDestination()
 			MissionRoutePlanner planner(*mission_route_cache);
 			const auto &vehicle_status = _vehicle_status_sub.get();
 			const auto *local_position = _navigator->get_local_position();
+			_one_rally_point_has_land_approach = false;
+			uint64_t usable_safe_points = 0;
+			const bool vtol_in_fw_mode = vehicle_status.is_vtol
+						     && (vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING);
+			const bool force_appr = _param_rtl_appr_force.get() == 1;
+			const int safe_point_count = math::min(mission_route_cache->safePointCount(),
+							       static_cast<int>(MissionRoutePlanner::MAX_SAFE_POINT_BATCH));
+
+			for (int safe_point_candidate_index = 0; safe_point_candidate_index < safe_point_count; ++safe_point_candidate_index) {
+				mission_item_s safe_point_item{};
+
+				if (!mission_route_cache->loadSafePointItem(safe_point_candidate_index, safe_point_item)) {
+					continue;
+				}
+
+				MissionRoutePlanner::Position safe_point_position{};
+
+				if (!MissionRoutePlanner::extractSafePointPosition(safe_point_item, _home_pos_sub.get().alt, safe_point_position)) {
+					continue;
+				}
+
+				PositionYawSetpoint safe_point_destination{safe_point_position.lat, safe_point_position.lon, safe_point_position.alt, NAN};
+				const bool has_approach = hasVtolLandApproach(safe_point_destination);
+				_one_rally_point_has_land_approach |= has_approach;
+
+				if (!vtol_in_fw_mode || !force_appr || has_approach) {
+					usable_safe_points |= (1ULL << safe_point_candidate_index);
+				}
+			}
 
 			MissionRoutePlanner::Config config{};
 			config.vehicle_projection_search_dist = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
@@ -385,13 +417,16 @@ void RTL::setRtlTypeAndDestination()
 						&& !vehicle_status.in_transition_mode;
 			config.is_flying_reverse = cached_route_safe_point_plan.valid()
 						   ? cached_route_safe_point_plan.selection.path.direction_reversed : false;
-			config.vehicle_velocity_valid = PX4_ISFINITE(local_position->vx) && PX4_ISFINITE(local_position->vy);
-			config.vehicle_velocity_north = local_position->vx;
-			config.vehicle_velocity_east = local_position->vy;
+			config.vehicle_velocity_valid = (local_position != nullptr)
+							&& PX4_ISFINITE(local_position->vx)
+							&& PX4_ISFINITE(local_position->vy);
+			config.vehicle_velocity_north = (local_position != nullptr) ? local_position->vx : NAN;
+			config.vehicle_velocity_east = (local_position != nullptr) ? local_position->vy : NAN;
 			config.vehicle_is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
 			config.vehicle_in_transition_to_fw = vehicle_status.in_transition_to_fw;
 			config.u_turn_penalty_m = _param_rtl_fw_uturn_pen.get();
 			config.last_flown_loop_segment = _last_route_safe_point_loop_segment;
+			config.usable_safe_point_bitmask = usable_safe_points;
 
 			MissionRoutePlanner::Position vehicle_position{
 				_global_pos_sub.get().lat,
@@ -645,7 +680,7 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 
 			if (!success) {
 				/* not supposed to happen unless the datamanager can't access the SD card, etc. */
-				mavlink_log_critical(_navigator->get_mavlink_log_pub(), "Mission land item could not be read.	");
+				mavlink_log_critical(_navigator->get_mavlink_log_pub(), "Mission land item could not be read.\t");
 				events::send(events::ID("rtl_failed_to_read_land_item"), events::Log::Error,
 					     "Mission land item could not be read");
 

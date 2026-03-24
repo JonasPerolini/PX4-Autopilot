@@ -674,6 +674,66 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_DefaultDataset)
 	EXPECT_EQ(provider.safePointLoadCount(), 7);
 }
 
+// WHY: The planner now uses a simple usability bitmask, so a masked-out safe point must be
+//      skipped without any callback indirection or planner-side policy knowledge.
+// WHAT: The closest safe point is masked out and the next allowed one is selected.
+TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
+{
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 30.f, 15.f, kAlt),
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 80.f, 20.f, kAlt),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	MissionRoutePlanner planner{provider};
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+	config.usable_safe_point_bitmask = 1ULL << 1;
+
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+
+	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
+
+	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.safe_point_index, 1);
+}
+
+// WHY: When the usability bitmask rejects every safe point, selectSafePoint must report that
+//      no safe-point destination is available so the caller can fall back appropriately.
+// WHAT: Valid safe points with a zero mask return found=false.
+TEST_F(RtlSafePointTest, UsableSafePointBitmaskCanRejectAllSafePoints)
+{
+	std::vector<mission_item_s> mission{
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+	};
+
+	std::vector<mission_item_s> safe_points{
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 30.f, 15.f, kAlt),
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 80.f, 20.f, kAlt),
+	};
+
+	VectorProvider provider{mission, safe_points};
+	MissionRoutePlanner planner{provider};
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
+	config.usable_safe_point_bitmask = 0;
+
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+
+	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
+
+	EXPECT_FALSE(selection.found);
+}
+
 // ============================================================================
 // GROUP 6: Loop handling in safe point selection
 // ============================================================================

@@ -127,6 +127,12 @@ void MissionBase::onMissionUpdate(bool has_mission_items_changed)
 		_dataman_cache.invalidate();
 		_load_mission_index = -1;
 
+		if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE)
+		    || (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)) {
+			resetJoinRouteState();
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+		}
+
 		if (canRunMissionFeasibility()) {
 			_mission_checked = true;
 			check_mission_valid();
@@ -1158,6 +1164,9 @@ int MissionBase::getNonJumpItem(int32_t &mission_index, mission_item_s &mission,
 						events::send(events::ID("mission_failed_to_write_do_jump"), events::Log::Error,
 							     "DO JUMP waypoint could not be written");
 						// Still continue searching for next non jump item.
+
+					} else {
+						syncMissionRouteCacheItem(new_mission_index, new_mission);
 					}
 
 					report_do_jump_mission_changed(new_mission_index, new_mission.do_jump_repeat_count - new_mission.do_jump_current_count);
@@ -1214,6 +1223,19 @@ bool MissionBase::loadMissionItemFromCache(int32_t index, mission_item_s &missio
 	       && _dataman_cache.loadWait(static_cast<dm_item_t>(_mission.mission_dataman_id), index,
 					  reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
 					  MAX_DATAMAN_LOAD_WAIT);
+}
+
+void MissionBase::syncMissionRouteCacheItem(int32_t index, const mission_item_s &mission_item)
+{
+	if (_navigator == nullptr) {
+		return;
+	}
+
+	MissionRouteCache *mission_route_cache = _navigator->get_mission_route_cache();
+
+	if (mission_route_cache != nullptr) {
+		mission_route_cache->syncMissionItem(_mission, index, mission_item);
+	}
 }
 
 bool MissionBase::findNextPositionIndexNoJump(int32_t start_index, int32_t &next_index)
@@ -1386,37 +1408,61 @@ void MissionBase::getPreviousPositionItems(int32_t start_index, int32_t items_in
 		size_t &num_found_items, uint8_t max_num_items)
 {
 	num_found_items = 0u;
-	int32_t search_index = start_index;
+
+	int32_t next_mission_index{start_index};
 
 	for (size_t item_idx = 0u; item_idx < max_num_items; item_idx++) {
-		int32_t found_index = -1;
-
-		if (!findPreviousPositionIndexNoJump(search_index, found_index)) {
+		if (next_mission_index < 0) {
 			break;
 		}
 
-		items_index[item_idx] = found_index;
-		num_found_items = item_idx + 1;
-		search_index = found_index;
+		mission_item_s next_mission_item;
+		bool found_next_item{false};
+
+		do {
+			next_mission_index--;
+			found_next_item = getNonJumpItem(next_mission_index, next_mission_item, true, false, true) == PX4_OK;
+		} while (!MissionBlock::item_contains_position(next_mission_item) && found_next_item);
+
+		if (found_next_item) {
+			items_index[item_idx] = next_mission_index;
+			num_found_items = item_idx + 1;
+
+		} else {
+			break;
+		}
 	}
 }
 
 void MissionBase::getNextPositionItems(int32_t start_index, int32_t items_index[],
 				       size_t &num_found_items, uint8_t max_num_items)
 {
+	// Make sure vector does not contain any preexisting elements.
 	num_found_items = 0u;
-	int32_t search_index = start_index;
+
+	int32_t next_mission_index{start_index};
 
 	for (size_t item_idx = 0u; item_idx < max_num_items; item_idx++) {
-		int32_t found_index = -1;
-
-		if (!findNextPositionIndexNoJump(search_index, found_index)) {
+		if (next_mission_index >= _mission.count) {
 			break;
 		}
 
-		items_index[item_idx] = found_index;
-		num_found_items = item_idx + 1;
-		search_index = found_index + 1;
+		mission_item_s next_mission_item;
+		bool found_next_item{false};
+
+		do {
+			found_next_item = getNonJumpItem(next_mission_index, next_mission_item, true, false, false) == PX4_OK;
+			next_mission_index++;
+		} while (!MissionBlock::item_contains_position(next_mission_item) && found_next_item);
+
+		if (found_next_item) {
+			items_index[item_idx] = math::max(next_mission_index - 1,
+							  static_cast<int32_t>(0)); // subtract 1 to get the index of the first position item
+			num_found_items = item_idx + 1;
+
+		} else {
+			break;
+		}
 	}
 }
 
@@ -1569,6 +1615,8 @@ void MissionBase::resetMissionJumpCounter()
 				PX4_ERR("Could not write mission item for jump count reset.");
 				break;
 			}
+
+			syncMissionRouteCacheItem(mission_index, mission_item);
 		}
 	}
 }
