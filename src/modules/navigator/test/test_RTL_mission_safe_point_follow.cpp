@@ -141,37 +141,37 @@ private:
 class RtlMissionSafePointFollowStageTest : public ::testing::Test
 {
 protected:
-	static RtlMissionSafePointFollowTestPeer *executor;
+	RtlMissionSafePointFollowTestPeer executor{};
 
-	static void SetUpTestSuite()   { executor = new RtlMissionSafePointFollowTestPeer(); }
-	static void TearDownTestSuite() { delete executor; executor = nullptr; }
+	void SetUp() override
+	{
+		executor.loadTestMission({});
+	}
 
 	static constexpr double kLat = 47.397742;
 	static constexpr double kLon = 8.545594;
 	static constexpr float kAlt = 500.f;
 };
 
-RtlMissionSafePointFollowTestPeer *RtlMissionSafePointFollowStageTest::executor = nullptr;
-
 // WHY: TransitionDuringRoute is a one-shot state used only to issue a VTOL transition.
 // WHAT: setNextMissionItem returns to FollowRoute and clears the remembered transition target.
 TEST_F(RtlMissionSafePointFollowStageTest, TransitionDuringRouteResumesFollowRoute)
 {
 	// GIVEN: An executor paused in the transition stage with a remembered target index.
-	executor->loadTestMission({
+	executor.loadTestMission({
 		makePositionItem(kLat, kLon, kAlt),
 		makePositionItem(kLat + 0.001, kLon, kAlt),
 	});
-	executor->setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::TransitionDuringRoute);
-	executor->setTransitionTargetIndexForTest(1);
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::TransitionDuringRoute);
+	executor.setTransitionTargetIndexForTest(1);
 
 	// WHEN: setNextMissionItem advances the stage machine.
-	const bool advanced = executor->advanceStageForTest();
+	const bool advanced = executor.advanceStageForTest();
 
 	// THEN: The transition stage completes and route following resumes.
 	EXPECT_TRUE(advanced);
-	EXPECT_EQ(executor->stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
-	EXPECT_EQ(executor->transitionTargetIndexForTest(), -1);
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
+	EXPECT_EQ(executor.transitionTargetIndexForTest(), -1);
 }
 
 // WHY: After the virtual branch-off waypoint is reached, the executor must commit to the final landing stage.
@@ -179,19 +179,19 @@ TEST_F(RtlMissionSafePointFollowStageTest, TransitionDuringRouteResumesFollowRou
 TEST_F(RtlMissionSafePointFollowStageTest, BranchOffTransitionsToLandAtGoal)
 {
 	// GIVEN: An executor that has already reached the branch-off waypoint.
-	executor->loadTestMission({
+	executor.loadTestMission({
 		makePositionItem(kLat, kLon, kAlt),
 		makePositionItem(kLat + 0.001, kLon, kAlt),
 	});
-	executor->setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
 
 	// WHEN: setNextMissionItem advances the stage machine.
-	const bool advanced = executor->advanceStageForTest();
+	const bool advanced = executor.advanceStageForTest();
 
 	// THEN: The executor commits to the landing stage and stays on the direct branch.
 	EXPECT_TRUE(advanced);
-	EXPECT_EQ(executor->stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
-	EXPECT_TRUE(executor->shouldGoStraightToGoalForTest());
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
+	EXPECT_TRUE(executor.shouldGoStraightToGoalForTest());
 }
 
 // WHY: Nominal route following must switch to BranchOff exactly when the next route target is the branch-off anchor.
@@ -199,21 +199,21 @@ TEST_F(RtlMissionSafePointFollowStageTest, BranchOffTransitionsToLandAtGoal)
 TEST_F(RtlMissionSafePointFollowStageTest, ForwardRouteAdvanceTransitionsToBranchOff)
 {
 	// GIVEN: A forward route with the next position item equal to the cached branch-off index.
-	executor->loadTestMission({
+	executor.loadTestMission({
 		makePositionItem(kLat, kLon, kAlt),
 		makePositionItem(kLat + 0.001, kLon, kAlt),
 		makePositionItem(kLat + 0.002, kLon, kAlt),
 	});
-	executor->setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
-	executor->setCurrentSequenceForTest(1);
-	executor->setSafePointSelectionForTest(false, 2);
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
+	executor.setCurrentSequenceForTest(1);
+	executor.setSafePointSelectionForTest(false, 2);
 
 	// WHEN: setNextMissionItem advances along the nominal route.
-	const bool advanced = executor->advanceStageForTest();
+	const bool advanced = executor.advanceStageForTest();
 
 	// THEN: The executor advances to the branch-off anchor and switches stage.
 	EXPECT_TRUE(advanced);
-	EXPECT_EQ(executor->stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
 }
 
 // WHY: Reverse route following must use the previous position item as the next route target.
@@ -221,19 +221,62 @@ TEST_F(RtlMissionSafePointFollowStageTest, ForwardRouteAdvanceTransitionsToBranc
 TEST_F(RtlMissionSafePointFollowStageTest, ReverseRouteAdvanceTransitionsToBranchOff)
 {
 	// GIVEN: A reverse route whose previous position item is the cached branch-off index.
-	executor->loadTestMission({
+	executor.loadTestMission({
 		makePositionItem(kLat, kLon, kAlt),
 		makePositionItem(kLat + 0.001, kLon, kAlt),
 		makePositionItem(kLat + 0.002, kLon, kAlt),
 	});
-	executor->setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
-	executor->setCurrentSequenceForTest(2);
-	executor->setSafePointSelectionForTest(true, 1);
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
+	executor.setCurrentSequenceForTest(2);
+	executor.setSafePointSelectionForTest(true, 1);
 
 	// WHEN: setNextMissionItem advances along the reverse route.
-	const bool advanced = executor->advanceStageForTest();
+	const bool advanced = executor.advanceStageForTest();
 
 	// THEN: The executor reaches the branch-off anchor and switches stage.
 	EXPECT_TRUE(advanced);
-	EXPECT_EQ(executor->stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::BranchOff);
+}
+
+// WHY: Route-follow exhaustion should continue RTL toward the selected goal.
+// WHAT: When forward traversal is already at the last route item, advancing from FollowRoute moves to LandAtGoal.
+TEST_F(RtlMissionSafePointFollowStageTest, ForwardRouteExhaustionTransitionsToLandAtGoal)
+{
+	// GIVEN: A forward route whose current sequence is already the final position item.
+	executor.loadTestMission({
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+	});
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
+	executor.setCurrentSequenceForTest(1);
+
+	// WHEN: setNextMissionItem tries to advance beyond the route end.
+	const bool advanced = executor.advanceStageForTest();
+
+	// THEN: The executor keeps RTL alive by handing over to the landing stage.
+	EXPECT_TRUE(advanced);
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
+	EXPECT_TRUE(executor.shouldGoStraightToGoalForTest());
+}
+
+// WHY: Reverse route exhaustion should also continue RTL toward the selected goal.
+// WHAT: When reverse traversal is already at the first route item, advancing from FollowRoute moves to LandAtGoal.
+TEST_F(RtlMissionSafePointFollowStageTest, ReverseRouteExhaustionTransitionsToLandAtGoal)
+{
+	// GIVEN: A reverse route whose current sequence is already the first position item.
+	executor.loadTestMission({
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+	});
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::FollowRoute);
+	executor.setCurrentSequenceForTest(0);
+	executor.setSafePointSelectionForTest(true, 0);
+
+	// WHEN: setNextMissionItem tries to advance past the reverse route start.
+	const bool advanced = executor.advanceStageForTest();
+
+	// THEN: The executor keeps RTL alive by handing over to the landing stage.
+	EXPECT_TRUE(advanced);
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
+	EXPECT_TRUE(executor.shouldGoStraightToGoalForTest());
 }

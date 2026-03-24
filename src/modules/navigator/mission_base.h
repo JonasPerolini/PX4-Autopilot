@@ -62,6 +62,7 @@
 using namespace time_literals;
 
 class Navigator;
+class MissionBaseTestPeer;
 
 class MissionBase : public MissionBlock, public ModuleParams
 {
@@ -479,6 +480,8 @@ protected:
 	void checkMissionRestart();
 
 private:
+	friend class MissionBaseTestPeer;
+
 	/**
 	 * @brief Maximum number of jump mission items iterations
 	 *

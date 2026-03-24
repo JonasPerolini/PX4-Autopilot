@@ -146,6 +146,10 @@ private:
 // Mission item factory helpers
 // ============================================================================
 
+// These helpers stay header-only because only a small set of navigator test TUs include
+// them today. If reuse widens or the bodies become materially larger, move them into a
+// shared test-support .cpp to avoid duplicated code generation.
+
 /** @brief Build an absolute mission item at the given coordinates. */
 static inline mission_item_s makePositionItem(double lat, double lon, float alt,
 		uint16_t nav_cmd = NAV_CMD_WAYPOINT)
@@ -286,8 +290,15 @@ static inline MissionRoutePlanner::Config fwConfig()
 }
 
 // ============================================================================
-// Tolerance constants
+// Shared reference geometry and tolerance constants
 // ============================================================================
+
+namespace rtl_test_reference
+{
+static constexpr double kBaseLat = 47.397742;
+static constexpr double kBaseLon = 8.545594;
+static constexpr float kAlt = 500.f;
+}
 
 static constexpr double kLatLonToleranceDeg = 1e-7;     // ~1 cm at equator
 static constexpr float kAltitudeTolerance = 2.0f;       // meters

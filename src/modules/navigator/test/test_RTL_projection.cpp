@@ -44,9 +44,11 @@
 #include "test_RTL_helpers.h"
 #include "test_RTL_data.h"
 
-static constexpr double kBaseLat = 47.397742;
-static constexpr double kBaseLon = 8.545594;
-static constexpr float  kAlt     = 500.f;
+#include <array>
+
+using rtl_test_reference::kAlt;
+using rtl_test_reference::kBaseLat;
+using rtl_test_reference::kBaseLon;
 
 // ============================================================================
 // Test fixture
@@ -124,6 +126,21 @@ INSTANTIATE_TEST_SUITE_P(
 	::testing::Values(-42, -1, 99)
 );
 
+// WHY: Relative-altitude mission items require a valid home altitude in order to produce a safe AMSL target.
+// WHAT: A relative-altitude item with NaN home altitude yields NaN absolute altitude and is rejected as a mission position.
+TEST_F(RtlProjectionTest, RelativeAltitudeRequiresFiniteHomeAltitude)
+{
+	mission_item_s mission_item = makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, 50.f);
+	mission_item.altitude_is_relative = true;
+
+	MissionRoutePlanner::Position position{};
+	const float absolute_altitude = MissionRoutePlanner::getAbsoluteAltitudeForMissionItem(mission_item, NAN);
+
+	EXPECT_FALSE(PX4_ISFINITE(absolute_altitude));
+	EXPECT_FALSE(MissionRoutePlanner::extractMissionPosition(mission_item, NAN, position));
+}
+
+
 
 // WHY: Reverse route following changes which segment owns a boundary mission index.
 // WHAT: Vehicle on the waypoint-1 corner with mission_index=1 should map to [1-2] when flying in reverse.
@@ -200,6 +217,17 @@ struct ProjectionDatasetCase {
 	int expected_end_idx;
 };
 
+static constexpr std::array<ProjectionDatasetCase, 8> kProjectionDatasetCases{{
+		{"DefaultOnCurrentSegment", false, 46.10508903154495, 2.302372024012729, 463.0f, 2, 1, 2},
+		{"DefaultOnSameSegment", false, 46.098944316424465, 2.2977800821792327, 475.6f, 1, 0, 1},
+		{"DefaultFrontBackDifferentSegment", false, 46.10795279737903, 2.299475977516394, 454.4f, 5, 4, 5},
+		{"DefaultCoincidingSegments", false, 46.11174050459439, 2.2876843642852362, 475.9f, 8, 7, 8},
+		{"DefaultAtRouteEnd", false, 46.112843317707494, 2.3059421291432525, 455.4f, 15, 14, 15},
+		{"CornerOnSeg1To2", true, 46.103348739288705, 2.3235968076446945, 479.7f, 2, 1, 2},
+		{"CornerOnSeg4To5", true, 46.10205080248656, 2.318838207366314, 462.1f, 5, 4, 5},
+		{"CornerOnSmallSegment", true, 46.10361319095525, 2.3183349874167636, 462.6f, 13, 12, 13},
+	}};
+
 class RtlProjectionDatasetTest : public MissionRoutePlannerTestBase,
 	public ::testing::WithParamInterface<ProjectionDatasetCase> {};
 
@@ -228,16 +256,7 @@ TEST_P(RtlProjectionDatasetTest, SelectsExpectedSegment)
 INSTANTIATE_TEST_SUITE_P(
 	DatasetScenarios,
 	RtlProjectionDatasetTest,
-	::testing::Values(
-		ProjectionDatasetCase{"DefaultOnCurrentSegment", false, 46.10508903154495, 2.302372024012729, 463.0f, 2, 1, 2},
-		ProjectionDatasetCase{"DefaultOnSameSegment", false, 46.098944316424465, 2.2977800821792327, 475.6f, 1, 0, 1},
-		ProjectionDatasetCase{"DefaultFrontBackDifferentSegment", false, 46.10795279737903, 2.299475977516394, 454.4f, 5, 4, 5},
-		ProjectionDatasetCase{"DefaultCoincidingSegments", false, 46.11174050459439, 2.2876843642852362, 475.9f, 8, 7, 8},
-		ProjectionDatasetCase{"DefaultAtRouteEnd", false, 46.112843317707494, 2.3059421291432525, 455.4f, 15, 14, 15},
-		ProjectionDatasetCase{"CornerOnSeg1To2", true, 46.103348739288705, 2.3235968076446945, 479.7f, 2, 1, 2},
-		ProjectionDatasetCase{"CornerOnSeg4To5", true, 46.10205080248656, 2.318838207366314, 462.1f, 5, 4, 5},
-		ProjectionDatasetCase{"CornerOnSmallSegment", true, 46.10361319095525, 2.3183349874167636, 462.6f, 13, 12, 13}
-	),
+	::testing::ValuesIn(kProjectionDatasetCases),
 	[](const ::testing::TestParamInfo<ProjectionDatasetCase> &param_info)
 {
 	return param_info.param.name;
@@ -245,7 +264,7 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 // ============================================================================
-// GROUP 4: Candidate buffer and local-minimum detection
+// GROUP 3: Candidate buffer and local-minimum detection
 // ============================================================================
 
 // WHY: A rally point behind the takeoff should project onto the first segment [0-1], detecting takeoff as a local minimum.
@@ -457,7 +476,7 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 }
 
 // ============================================================================
-// GROUP 5: Edge cases and error handling
+// GROUP 4: Edge cases and error handling
 // ============================================================================
 
 // WHY: Projection should reject both non-finite and finite-but-invalid global positions early.

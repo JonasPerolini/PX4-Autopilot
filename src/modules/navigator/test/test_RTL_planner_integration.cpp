@@ -48,9 +48,10 @@
 
 #include <cmath>
 
-static constexpr double kBaseLat = 47.397742;
-static constexpr double kBaseLon = 8.545594;
-static constexpr float kAlt = 500.f;
+using rtl_test_reference::kAlt;
+using rtl_test_reference::kBaseLat;
+using rtl_test_reference::kBaseLon;
+
 static constexpr float kYawToleranceRad = 0.15f;
 
 static float wrappedAngleError(float a, float b)

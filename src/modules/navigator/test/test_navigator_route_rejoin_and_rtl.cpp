@@ -44,8 +44,10 @@
 #include <gtest/gtest.h>
 
 #include <dataman_client/DatamanClient.hpp>
+#include <drivers/drv_hrt.h>
 #include <parameters/param.h>
 #include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
+#include <px4_platform_common/time.h>
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/home_position.h>
@@ -56,7 +58,6 @@
 #include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_status.h>
 
-#include <unistd.h>
 
 #include "mission.h"
 #include "navigator.h"
@@ -64,6 +65,14 @@
 #include "test_RTL_helpers.h"
 
 extern "C" __EXPORT int dataman_main(int argc, char *argv[]);
+
+using namespace time_literals;
+using rtl_test_reference::kAlt;
+using rtl_test_reference::kBaseLat;
+using rtl_test_reference::kBaseLon;
+
+static constexpr hrt_abstime kRouteCacheReadyTimeout = 2_s;
+static constexpr useconds_t kRouteCachePollIntervalUs = 1_ms;
 
 class MissionPeer : public Mission
 {
@@ -104,9 +113,7 @@ protected:
 		px4::WorkQueueManagerStop();
 	}
 
-	static constexpr double kBaseLat = 47.397742;
-	static constexpr double kBaseLon = 8.545594;
-	static constexpr float kBaseAlt = 500.f;
+	static constexpr float kBaseAlt = kAlt;
 
 	void setIntParam(const char *name, int32_t value)
 	{
@@ -122,6 +129,13 @@ protected:
 			ASSERT_TRUE(_dataman_client.writeSync(dataman_id, i,
 							      reinterpret_cast<uint8_t *>(&item), sizeof(item)));
 		}
+	}
+
+	void writeSafePointItems(const std::vector<mission_item_s> &items, uint32_t opaque_id,
+				 dm_item_t dataman_id = DM_KEY_SAFE_POINTS_0)
+	{
+		writeMissionItems(items, dataman_id);
+		writeSafePointState(static_cast<uint16_t>(items.size()), opaque_id, dataman_id);
 	}
 
 	void writeSafePointState(uint16_t num_items, uint32_t opaque_id = 1, dm_item_t dataman_id = DM_KEY_SAFE_POINTS_0)
@@ -207,22 +221,32 @@ protected:
 		*navigator.get_home_position() = _home_position;
 	}
 
+	void markMissionResultValid(Navigator &navigator)
+	{
+		*navigator.get_mission_result() = mission_result_s{};
+		navigator.get_mission_result()->valid = true;
+	}
+
 	void updateRouteCacheUntilReady(Navigator &navigator, const mission_s &mission)
 	{
 		MissionRouteCache *route_cache = navigator.get_mission_route_cache();
 		ASSERT_NE(route_cache, nullptr);
 
-		for (int i = 0; i < 200; ++i) {
+		// MissionRouteCache::update() advances async dataman and cache state machines over
+		// multiple polls, so use a wall-clock deadline instead of a fragile fixed iteration cap.
+		hrt_abstime start_time = hrt_absolute_time();
+
+		while (hrt_elapsed_time(&start_time) <= kRouteCacheReadyTimeout) {
 			route_cache->update(mission);
 
 			if (route_cache->isReady(mission) && route_cache->safePointsReady()) {
 				return;
 			}
 
-			usleep(1000);
+			px4_usleep(kRouteCachePollIntervalUs);
 		}
 
-		FAIL() << "MissionRouteCache did not become ready";
+		FAIL() << "MissionRouteCache did not become ready within " << (kRouteCacheReadyTimeout / 1000) << " ms";
 	}
 
 	DatamanClient _dataman_client{};
@@ -240,12 +264,20 @@ protected:
 	home_position_s _home_position{};
 };
 
+// WHY: When a mission contains a DO_JUMP loop, smart rejoin must pick the loop exit that
+//      minimises distance to the vehicle's current position, rather than always starting
+//      from the first iteration. Choosing the wrong iteration would add unnecessary flight
+//      time and fuel burn.
+// WHAT: A looping mission with DO_JUMP(repeat=2) and the vehicle near WP2 → rejoin selects
+//       the shortest-path loop exit at idx 2 with a valid join context and no VTOL transition.
 TEST_F(NavigatorRouteRejoinAndRtlTest, MissionSmartRejoinUsesShortestLoopExit)
 {
 	setIntParam("MIS_ROUTE_JOIN", 1);
 	Navigator navigator;
 	MissionPeer mission(&navigator);
 
+	// GIVEN: A mission with a 3-waypoint loop (DO_JUMP back to idx 0, repeat=2) followed
+	//        by a landing item, and the vehicle positioned near WP2.
 	std::vector<mission_item_s> mission_items = {
 		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kBaseAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kBaseAlt),
@@ -280,13 +312,145 @@ TEST_F(NavigatorRouteRejoinAndRtlTest, MissionSmartRejoinUsesShortestLoopExit)
 	updateRouteCacheUntilReady(navigator, mission_state);
 	mission.on_inactive();
 
+	// WHEN: trySetRouteJoinOnActivation computes the optimal rejoin point.
 	ASSERT_TRUE(mission.trySetRouteJoinOnActivation(false));
+
+	// THEN: The rejoin targets WP2 (the closest loop exit), sets the work item to
+	//       JOIN_ROUTE with a valid context, and requires no VTOL transition (non-VTOL vehicle).
 	EXPECT_EQ(mission.currentSequenceForTest(), 2);
 	EXPECT_EQ(mission.workItemTypeForTest(), MissionPeer::WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE);
 	EXPECT_TRUE(mission.joinContextForTest().valid());
 	EXPECT_EQ(mission.joinTransitionActionForTest(), MissionPeer::VtolTransitionAction::None);
 }
 
+// WHY: When the vehicle is close to the landing waypoint and already descending, enforcing a
+//      strict altitude match before rejoining would force an unnecessary climb. The rejoin
+//      planner must detect proximity to the landing segment and skip the altitude requirement
+//      so the vehicle can continue its approach smoothly.
+// WHAT: Vehicle near the landing item at a lower altitude → rejoin succeeds with
+//       skip_altitude_requirement=true and the projection altitude matching the vehicle.
+TEST_F(NavigatorRouteRejoinAndRtlTest, MissionSmartRejoinNearLandingSkipsAltitudeRequirement)
+{
+	setIntParam("MIS_ROUTE_JOIN", 1);
+	Navigator navigator;
+	MissionPeer mission(&navigator);
+
+	// GIVEN: A simple takeoff→waypoint→land mission, current_seq already at the land item,
+	//        and the vehicle positioned close to the landing point but 6 m below mission altitude.
+	std::vector<mission_item_s> mission_items = {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon,   0.f, 0.f, kBaseAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kBaseAlt),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 120.f, 0.f, kBaseAlt - 10.f),
+	};
+
+	writeMissionItems(mission_items);
+	writeSafePointState(0, 13);
+
+	mission_s mission_state{};
+	mission_state.timestamp = hrt_absolute_time();
+	mission_state.current_seq = 2;
+	mission_state.land_start_index = 2;
+	mission_state.land_index = 2;
+	mission_state.mission_id = 23;
+	mission_state.safe_points_id = 13;
+	mission_state.count = static_cast<uint16_t>(mission_items.size());
+	mission_state.mission_dataman_id = DM_KEY_WAYPOINTS_OFFBOARD_0;
+	mission_state.fence_dataman_id = DM_KEY_FENCE_POINTS_0;
+	mission_state.safepoint_dataman_id = DM_KEY_SAFE_POINTS_0;
+	publishMission(mission_state);
+
+	const MissionRoutePlanner::Position vehicle_position =
+		makePositionFromOffset(kBaseLat, kBaseLon, 118.f, 0.f, kBaseAlt - 6.f);
+
+	publishVehicleStatus(false, vehicle_status_s::VEHICLE_TYPE_FIXED_WING);
+	publishLandDetected(false);
+	publishGlobalPosition(vehicle_position);
+	publishLocalPosition(0.f, 8.f, 0.f);
+	publishHomePosition(makePositionFromOffset(kBaseLat, kBaseLon, -100.f, 0.f, kBaseAlt));
+	primeNavigatorState(navigator);
+
+	updateRouteCacheUntilReady(navigator, mission_state);
+	mission.on_inactive();
+
+	// WHEN: trySetRouteJoinOnActivation computes the rejoin near the landing segment.
+	ASSERT_TRUE(mission.trySetRouteJoinOnActivation(false));
+
+	// THEN: The rejoin targets the land item (idx 2), uses the vehicle's current altitude
+	//       for the projection (no climb-back), and flags skip_altitude_requirement.
+	EXPECT_EQ(mission.currentSequenceForTest(), 2);
+	EXPECT_EQ(mission.workItemTypeForTest(), MissionPeer::WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE);
+	EXPECT_TRUE(mission.joinContextForTest().valid());
+	EXPECT_TRUE(mission.joinContextForTest().skip_altitude_requirement);
+	EXPECT_NEAR(mission.joinContextForTest().projection.alt, vehicle_position.alt, 0.01f);
+}
+
+// WHY: RTL type 6 should prefer following the mission route to a safe point over a direct
+//      return to home, because the mission route avoids obstacles/no-fly zones that the
+//      operator planned around. When route planning succeeds and a safe point is available,
+//      the RTL executor must select FOLLOW_MISSION_SAFE_POINT as the return strategy.
+// WHAT: RTL_TYPE=6 with a valid 4-item mission and one safe point → RTL status reports
+//       FOLLOW_MISSION_SAFE_POINT targeting safe_point_index 0.
+TEST_F(NavigatorRouteRejoinAndRtlTest, RtlType6SelectsMissionSafePointFollowWhenPlanSucceeds)
+{
+	setIntParam("RTL_TYPE", 6);
+	Navigator navigator;
+	RTL rtl(&navigator);
+	uORB::SubscriptionData<rtl_status_s> rtl_status_sub{ORB_ID(rtl_status)};
+
+	// GIVEN: A takeoff→WP→WP→land mission with one safe point, the vehicle near the start
+	//        of the route, and home far behind the vehicle.
+	std::vector<mission_item_s> mission_items = {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon,   0.f, 0.f, kBaseAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kBaseAlt + 20.f),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 400.f, 0.f, kBaseAlt + 30.f),
+		makeLandItemFromOffset(kBaseLat, kBaseLon,    600.f, 0.f, kBaseAlt - 10.f),
+	};
+	std::vector<mission_item_s> safe_points = {
+		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 50.f, kBaseAlt + 10.f),
+	};
+
+	writeMissionItems(mission_items);
+	writeSafePointItems(safe_points, 24);
+
+	mission_s mission_state{};
+	mission_state.timestamp = hrt_absolute_time();
+	mission_state.current_seq = 0;
+	mission_state.land_start_index = 3;
+	mission_state.land_index = 3;
+	mission_state.mission_id = 24;
+	mission_state.safe_points_id = 24;
+	mission_state.count = static_cast<uint16_t>(mission_items.size());
+	mission_state.mission_dataman_id = DM_KEY_WAYPOINTS_OFFBOARD_0;
+	mission_state.fence_dataman_id = DM_KEY_FENCE_POINTS_0;
+	mission_state.safepoint_dataman_id = DM_KEY_SAFE_POINTS_0;
+	publishMission(mission_state);
+
+	publishVehicleStatus(false, vehicle_status_s::VEHICLE_TYPE_FIXED_WING);
+	publishLandDetected(false);
+	publishGlobalPosition(makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kBaseAlt + 10.f));
+	publishLocalPosition(0.f, 12.f, 0.f);
+	publishHomePosition(makePositionFromOffset(kBaseLat, kBaseLon, -1000.f, 0.f, kBaseAlt));
+	primeNavigatorState(navigator);
+	markMissionResultValid(navigator);
+
+	updateRouteCacheUntilReady(navigator, mission_state);
+
+	// WHEN: RTL runs its on_inactive planning cycle.
+	rtl.on_inactive();
+
+	// THEN: RTL selects the mission-safe-point-follow strategy targeting safe point 0.
+	ASSERT_TRUE(rtl_status_sub.update());
+	const rtl_status_s &rtl_status = rtl_status_sub.get();
+	EXPECT_EQ(rtl_status.rtl_type, rtl_status_s::RTL_STATUS_TYPE_FOLLOW_MISSION_SAFE_POINT);
+	EXPECT_EQ(rtl_status.safe_point_index, 0);
+}
+
+// WHY: When route planning fails (e.g. degenerate mission with an invalid first waypoint at
+//      lat/lon 0,0), RTL type 6 must not silently do nothing — it must fall back to a direct
+//      mission land so the vehicle still has a safe landing strategy. Without this fallback
+//      the vehicle would have no RTL plan and could loiter indefinitely.
+// WHAT: RTL_TYPE=6 with a 2-item mission whose first WP is invalid (0,0) and no safe points
+//       → RTL falls back to DIRECT_MISSION_LAND with safe_point_index=UINT8_MAX.
 TEST_F(NavigatorRouteRejoinAndRtlTest, RtlType6PlanningFailureFallsBackToDirectMissionLand)
 {
 	setIntParam("RTL_TYPE", 6);
@@ -294,6 +458,8 @@ TEST_F(NavigatorRouteRejoinAndRtlTest, RtlType6PlanningFailureFallsBackToDirectM
 	RTL rtl(&navigator);
 	uORB::SubscriptionData<rtl_status_s> rtl_status_sub{ORB_ID(rtl_status)};
 
+	// GIVEN: A degenerate 2-item mission (first WP at lat/lon 0,0 makes the route invalid),
+	//        no safe points, and the vehicle near the landing item.
 	std::vector<mission_item_s> mission_items = {
 		makePositionItem(0.0, 0.0, kBaseAlt),
 		makeLandItemFromOffset(kBaseLat, kBaseLon, 120.f, 0.f, kBaseAlt - 10.f),
@@ -321,12 +487,14 @@ TEST_F(NavigatorRouteRejoinAndRtlTest, RtlType6PlanningFailureFallsBackToDirectM
 	publishLocalPosition(0.f, 0.f, 0.f);
 	publishHomePosition(makePositionFromOffset(kBaseLat, kBaseLon, -1000.f, 0.f, kBaseAlt));
 	primeNavigatorState(navigator);
-	*navigator.get_mission_result() = mission_result_s{};
-	navigator.get_mission_result()->valid = true;
+	markMissionResultValid(navigator);
 
 	updateRouteCacheUntilReady(navigator, mission_state);
+
+	// WHEN: RTL runs its on_inactive planning cycle with the degenerate mission.
 	rtl.on_inactive();
 
+	// THEN: Route planning fails, so RTL falls back to a direct mission land with no safe point.
 	ASSERT_TRUE(rtl_status_sub.update());
 	const rtl_status_s &rtl_status = rtl_status_sub.get();
 	EXPECT_EQ(rtl_status.rtl_type, rtl_status_s::RTL_STATUS_TYPE_DIRECT_MISSION_LAND);

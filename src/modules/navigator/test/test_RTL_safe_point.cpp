@@ -58,9 +58,9 @@
 // Common constants for offset-based tests
 // ============================================================================
 
-static constexpr double kBaseLat = 47.397742;
-static constexpr double kBaseLon = 8.545594;
-static constexpr float kAlt = 500.f;
+using rtl_test_reference::kAlt;
+using rtl_test_reference::kBaseLat;
+using rtl_test_reference::kBaseLon;
 
 // ============================================================================
 // Test fixture
@@ -406,32 +406,17 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestBehindReverse_FW)
 // WHAT: FW picks rally B (index 1, forward) instead of closer rally A (index 0, reverse).
 TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 {
-	// GIVEN: 5-wp straight mission (takeoff to land, 500m spacing). Rally A 200m behind, Rally B 600m ahead.
-	std::vector<mission_item_s> mission{
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
-	};
-
-	std::vector<mission_item_s> safe_points{
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),   // A: ~200m behind vehicle
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),  // B: ~600m ahead of vehicle
-	};
-
-	VectorProvider provider{mission, safe_points};
+	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
 	config.vehicle_velocity_valid = true;
 	config.vehicle_velocity_north = 15.f;
 	config.vehicle_velocity_east = 0.f;
 
-	const MissionRoutePlanner::Position vehicle_position =
-		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle at N+500, flying north along the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -445,21 +430,7 @@ TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 // WHAT: vehicle_in_transition_to_fw selects the forward rally just like a fixed-wing vehicle.
 TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
 {
-	// GIVEN: The same straight mission geometry used to verify the FW u-turn penalty.
-	std::vector<mission_item_s> mission{
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
-	};
-
-	std::vector<mission_item_s> safe_points{
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),
-	};
-
-	VectorProvider provider{mission, safe_points};
+	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = defaultConfig();
 	config.is_multicopter = false;
@@ -469,11 +440,10 @@ TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
 	config.vehicle_velocity_north = 15.f;
 	config.vehicle_velocity_east = 0.f;
 
-	const MissionRoutePlanner::Position vehicle_position =
-		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: The planner evaluates a vehicle that is already committed to a front transition.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -489,31 +459,16 @@ TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
 // WHAT: MC picks rally A (index 0, reverse, closer) for the same geometry as FWUturnPenalty test.
 TEST_F(RtlSafePointTest, MCNoUturnPenaltySelectsClosestReverse)
 {
-	// GIVEN: Same 5-wp straight mission and rally points as FWUturnPenalty test, but MC config.
-	std::vector<mission_item_s> mission{
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
-	};
-
-	std::vector<mission_item_s> safe_points{
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),   // A: ~200m behind
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),  // B: ~600m ahead
-	};
-
-	VectorProvider provider{mission, safe_points};
+	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config.vehicle_velocity_valid = true;
 	config.vehicle_velocity_north = 15.f;
 	config.vehicle_velocity_east = 0.f;
 
-	const MissionRoutePlanner::Position vehicle_position =
-		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: MC vehicle at N+500, flying north along the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -709,8 +664,12 @@ TEST_F(RtlSafePointTest, CornerMission_LoopSegmentIsHandled)
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
-	// THEN: Loop segment is handled; selection has a valid branch_off segment.
+	// THEN: Loop segment is handled; selection resolves to a safe point with a valid branch-off.
 	ASSERT_TRUE(selection.found);
+	EXPECT_TRUE(selection.safe_point_found);
+	EXPECT_EQ(selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_TRUE(selection.branch_off_segment.valid());
+	EXPECT_TRUE(selection.branch_off_projection.valid());
 	EXPECT_GE(selection.branch_off_segment.start.idx, 0);
 	EXPECT_GE(selection.branch_off_segment.end.idx, 0);
 }
@@ -723,7 +682,7 @@ TEST_F(RtlSafePointTest, CornerMission_LoopSegmentIsHandled)
 // WHAT: 4-wp mission with 6 safe points: missionLoadCount bounded by 2*M (not M*S), safePointLoadCount == 6.
 TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_Simple)
 {
-	// GIVEN: 4-wp square mission with 6 safe points, using CountingProvider.
+	// GIVEN: 4-wp square mission with 6 safe points, using VectorProvider.
 	std::vector<mission_item_s> mission{
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
@@ -765,7 +724,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_Simple)
 // WHAT: Default dataset mission with 7 safe points: missionLoadCount bounded by 2*M, safePointLoadCount == 7.
 TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_DefaultDataset)
 {
-	// GIVEN: Default 16-item mission with 7 rally points, using CountingProvider.
+	// GIVEN: Default 16-item mission with 7 rally points, using VectorProvider.
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	const MissionRoutePlanner::Position vehicle_position =
@@ -959,30 +918,15 @@ TEST_F(RtlSafePointTest, HandlesLoopWithRemainingIterations)
 // WHAT: FW with vehicle_velocity_valid=false picks the closest safe point regardless of direction.
 TEST_F(RtlSafePointTest, FWWithZeroVelocityPicksShortestPath)
 {
-	// GIVEN: Same straight mission as FWUturnPenalty test, but vehicle_velocity_valid=false.
-	std::vector<mission_item_s> mission{
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
-	};
-
-	std::vector<mission_item_s> safe_points{
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),   // A: ~200m behind
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),  // B: ~600m ahead
-	};
-
-	VectorProvider provider{mission, safe_points};
+	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
 	config.vehicle_velocity_valid = false;
 
-	const MissionRoutePlanner::Position vehicle_position =
-		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle without valid velocity data.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -995,32 +939,17 @@ TEST_F(RtlSafePointTest, FWWithZeroVelocityPicksShortestPath)
 // WHAT: FW with velocity=(0,15) (east, perpendicular to north-south route) should not require u-turn.
 TEST_F(RtlSafePointTest, FWWithOrthogonalVelocityNoUturn)
 {
-	// GIVEN: Same straight mission. FW config, velocity=(0,15) perpendicular to route.
-	std::vector<mission_item_s> mission{
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 2000.f, 0.f, kAlt),
-	};
-
-	std::vector<mission_item_s> safe_points{
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 300.f, 20.f, kAlt),   // A: ~200m behind
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 1100.f, 20.f, kAlt),  // B: ~600m ahead
-	};
-
-	VectorProvider provider{mission, safe_points};
+	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
 	config.vehicle_velocity_valid = true;
 	config.vehicle_velocity_north = 0.f;
 	config.vehicle_velocity_east = 15.f;
 
-	const MissionRoutePlanner::Position vehicle_position =
-		makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
+	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle flying east (orthogonal to north-south route).
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -1205,72 +1134,50 @@ TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
 // GROUP 9: Direct-to-safe-point shortcut (MC vs FW)
 // =============================================================================
 
-// WHY: When a multicopter is very close to a safe point, the planner should select
-//      direct_to_safe_point=true so the executor flies straight there without following the route.
-// WHAT: MC vehicle within direct_acceptance_radius of a rally point gets direct-to-safe-point.
-TEST_F(RtlSafePointTest, McDirectToNearbySafePoint)
+struct DirectToSafePointCase {
+	const char *name;
+	bool is_multicopter;
+	float vehicle_velocity_north;
+	bool expect_direct;
+};
+
+class RtlSafePointDirectShortcutTest : public RtlSafePointTest,
+	public ::testing::WithParamInterface<DirectToSafePointCase> {};
+
+TEST_P(RtlSafePointDirectShortcutTest, PlansDirectShortcutOnlyForMulticopter)
 {
-	std::vector<mission_item_s> mission = {
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt + 50.f),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt + 80.f),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt - 10.f),
-	};
-
-	std::vector<mission_item_s> safe_points = {
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 255.f, 0.f, kAlt + 50.f),
-	};
-
-	VectorProvider provider(mission, safe_points);
+	const DirectToSafePointCase &scenario = GetParam();
+	VectorProvider provider(direct_to_safe_point_dataset::mission(), direct_to_safe_point_dataset::safePoints());
 	MissionRoutePlanner planner(provider);
 
-	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 50.f);
-	config = defaultConfig();
-	config.is_multicopter = true;
+	auto vehicle_pos = direct_to_safe_point_dataset::vehiclePosition();
+	config = scenario.is_multicopter ? defaultConfig() : fwConfig();
+	config.is_multicopter = scenario.is_multicopter;
 	config.direct_acceptance_radius = 20.f;
-	config.vehicle_velocity_north = 5.f;
+	config.vehicle_velocity_north = scenario.vehicle_velocity_north;
 	config.vehicle_velocity_east = 0.f;
 	config.vehicle_velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
-	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, direct_to_safe_point_dataset::kMissionIndex, config, plan, &reason);
 
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
 	EXPECT_TRUE(plan.selection.found);
 	EXPECT_TRUE(plan.selection.safe_point_found);
-	EXPECT_TRUE(plan.selection.direct_to_safe_point);
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::SafePoint);
+	EXPECT_EQ(plan.selection.safe_point_index, 0);
+	EXPECT_EQ(plan.selection.direct_to_safe_point, scenario.expect_direct);
 }
 
-// WHY: Fixed-wing vehicles cannot hover, so the planner should NOT select direct-to-safe-point
-//      even when the safe point is very close. The vehicle must follow the route to the branch-off.
-// WHAT: FW vehicle near a safe point does NOT get direct_to_safe_point=true.
-TEST_F(RtlSafePointTest, FwDoesNotGetDirectToSafePoint)
+INSTANTIATE_TEST_SUITE_P(
+	VehicleType,
+	RtlSafePointDirectShortcutTest,
+	::testing::Values(
+		DirectToSafePointCase{"Multicopter", true, 5.f, true},
+		DirectToSafePointCase{"FixedWing", false, 15.f, false}
+	),
+	[](const ::testing::TestParamInfo<DirectToSafePointCase> &param_info)
 {
-	std::vector<mission_item_s> mission = {
-		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt + 50.f),
-		makePositionItemFromOffset(kBaseLat, kBaseLon, 1000.f, 0.f, kAlt + 80.f),
-		makeLandItemFromOffset(kBaseLat, kBaseLon, 1500.f, 0.f, kAlt - 10.f),
-	};
-
-	std::vector<mission_item_s> safe_points = {
-		makeSafePointFromOffset(kBaseLat, kBaseLon, 255.f, 0.f, kAlt + 50.f),
-	};
-
-	VectorProvider provider(mission, safe_points);
-	MissionRoutePlanner planner(provider);
-
-	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 250.f, 0.f, kAlt + 50.f);
-	config = fwConfig();
-	config.direct_acceptance_radius = 20.f;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 0.f;
-	config.vehicle_velocity_valid = true;
-
-	MissionRoutePlanner::Plan plan{};
-	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
-
-	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
-	EXPECT_TRUE(plan.selection.found);
-	EXPECT_FALSE(plan.selection.direct_to_safe_point);
+	return param_info.param.name;
 }
+);
