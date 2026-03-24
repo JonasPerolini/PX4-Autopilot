@@ -238,6 +238,11 @@ void MissionRouteCache::updateSafePointCache(const mission_s &mission)
 				_safe_point_error_state = SafePointDatamanState::ReadWait;
 				_safe_point_dataman_state = SafePointDatamanState::Error;
 
+			} else if (_safe_point_stats.num_items > DM_KEY_SAFE_POINTS_MAX) {
+				PX4_ERR("Safe points update failed! invalid count: %" PRIu16, _safe_point_stats.num_items);
+				_safe_point_error_state = SafePointDatamanState::ReadWait;
+				_safe_point_dataman_state = SafePointDatamanState::Error;
+
 			} else if (_opaque_id != _safe_point_stats.opaque_id) {
 				_opaque_id = _safe_point_stats.opaque_id;
 				_safe_points_ready = false;
