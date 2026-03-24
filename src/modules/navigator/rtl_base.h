@@ -58,6 +58,8 @@ public:
 
 	virtual void setRoutePlan(const MissionRoutePlanner::Plan &plan) { (void)plan; }
 
+	virtual void setShouldGoStraightToGoal(bool should_go_straight) { (void)should_go_straight; }
+
 	/**
 	 * @brief Return whether the RTL mode should keep the vehicle on the direct-to-goal branch.
 	 */

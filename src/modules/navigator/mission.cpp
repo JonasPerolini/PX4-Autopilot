@@ -190,25 +190,35 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 		return false;
 	}
 
-	// mission is always flown in nominal direction, go to the segment end idx
-	const int32_t route_target_index = projection_context.seg_candidate.segment.end.idx;
+	int32_t route_end_index = -1;
 
-	if (route_target_index < 0 || route_target_index >= _mission.count) {
+	if (!findAttachedPositionIndex(_mission.count - 1, route_end_index)) {
+		return false;
+	}
+
+	const MissionRoutePlanner::Path path = planner.findNominalPathToGoal(route_end_index,
+					       projection_context.dist_along_to_route_end, projection_context, config);
+
+	if (!path.valid() || path.first_item_index < 0 || path.first_item_index >= _mission.count) {
+		PX4_ERR("Mission route rejoin failed to find a valid nominal path");
 		return false;
 	}
 
 	_last_flown_loop_segment = projection_context.seg_candidate.segment;
-	setMissionIndex(route_target_index);
+	setMissionIndex(path.first_item_index);
 	_is_current_planned_mission_item_valid = isMissionValid();
 
-	MissionRoutePlanner::JoinContext join_context{};
-	join_context.projection = projection_context.seg_candidate.projection;
-	const VtolTransitionAction join_transition_action = vtolTransitionActionForTarget(_mission.current_seq, false);
+	MissionRoutePlanner::JoinContext join_context = planner.buildJoinContext(projection_context, path);
 
-	// TODO: support a front-transition before rejoining a fixed-wing segment. The shared
-	// transition helper can already detect this need, but Mission smart rejoin currently
-	// only implements the optional post-join back-transition path.
-	setupJoinRoute(join_context, join_transition_action == VtolTransitionAction::BackTransition);
+	if ((path.in_first_item_acc_rad)
+	    && (path.first_item_cmd == NAV_CMD_LAND || path.first_item_cmd == NAV_CMD_VTOL_LAND)) {
+		join_context.projection.alt = vehicle_position.alt;
+		join_context.skip_altitude_requirement = true;
+	}
+
+	const VtolTransitionAction join_transition_action = vtolTransitionActionForTarget(path.first_item_index,
+			path.direction_reversed);
+	setupJoinRoute(join_context, join_transition_action);
 
 	mavlink_log_info(_navigator->get_mavlink_log_pub(), "Rejoining mission route\t");
 	return true;

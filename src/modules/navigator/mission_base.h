@@ -89,7 +89,7 @@ protected:
 		WORK_ITEM_TYPE_DEFAULT,		/**< default mission item */
 		WORK_ITEM_TYPE_CLIMB,		/**< takeoff before moving to waypoint */
 		WORK_ITEM_TYPE_JOIN_ROUTE,	/**< fly a virtual branch-in waypoint before resuming the mission */
-		WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN,	/**< perform a VTOL back-transition after rejoining the route */
+		WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN,	/**< perform the required VTOL transition after rejoining the route */
 		WORK_ITEM_TYPE_MOVE_TO_LAND,	/**< move to land waypoint before descent */
 		WORK_ITEM_TYPE_ALIGN_HEADING,	/**< align for next waypoint */
 		WORK_ITEM_TYPE_TRANSITION_AFTER_TAKEOFF,
@@ -102,8 +102,15 @@ protected:
 		MISSION_TYPE_MISSION
 	} _mission_type{MissionType::MISSION_TYPE_NONE};
 
+	enum class VtolTransitionAction : uint8_t {
+		None = 0,
+		FrontTransition = 1,
+		BackTransition = 2
+	};
+
 	MissionRoutePlanner::JoinContext _route_join_context{};
-	bool _join_requires_back_transition{false};
+	VtolTransitionAction _join_transition_action{VtolTransitionAction::None};
+	static constexpr float kJoinRouteFlyByAcceptanceRadiusScale{2.f};
 
 	/**
 	 * @brief Get the Previous Mission Position Items
@@ -323,9 +330,9 @@ protected:
 	bool position_setpoint_equal(const position_setpoint_s *p1, const position_setpoint_s *p2) const;
 
 	/**
-	 * @brief Arm a virtual branch-in waypoint and optional post-join back-transition.
+	 * @brief Arm a virtual branch-in waypoint and optional post-join VTOL transition.
 	 */
-	void setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context, bool requires_transition);
+	void setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context, VtolTransitionAction transition_action);
 
 	/**
 	 * @brief Clear any pending virtual join-route state.
@@ -409,18 +416,13 @@ protected:
 	 *
 	 * Walks backward from @p anchor_index to find the most recent
 	 * NAV_CMD_DO_VTOL_TRANSITION item and returns the transition mode.
-	 * Defaults to MC if no transition item is found.
+	 * Defaults to the VTOL state active when the mission was uploaded.
 	 *
 	 * @param[in] anchor_index Mission index to check from
 	 * @return VEHICLE_VTOL_STATE_MC or VEHICLE_VTOL_STATE_FW
 	 */
 	uint8_t getVtolStateAtMissionIndex(int32_t anchor_index);
-
-	enum class VtolTransitionAction : uint8_t {
-		None = 0,
-		FrontTransition = 1,
-		BackTransition = 2
-	};
+	static bool vehicleInFwLikeState(const vehicle_status_s &vehicle_status);
 
 	/**
 	 * @brief Determine the VTOL transition action required to enter a segment.
@@ -603,6 +605,7 @@ private:
 	mission_item_s _last_camera_mode_item {};
 	mission_item_s _last_camera_trigger_item {};
 	mission_item_s _last_speed_change_item {};
+	uint8_t _vtol_state_on_mission_upload{vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC};
 
 	DEFINE_PARAMETERS_CUSTOM_PARENT(
 		ModuleParams,

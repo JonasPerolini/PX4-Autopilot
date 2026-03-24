@@ -51,6 +51,12 @@
 static constexpr double kBaseLat = 47.397742;
 static constexpr double kBaseLon = 8.545594;
 static constexpr float kAlt = 500.f;
+static constexpr float kYawToleranceRad = 0.15f;
+
+static float wrappedAngleError(float a, float b)
+{
+	return fabsf(atan2f(sinf(a - b), cosf(a - b)));
+}
 
 // ============================================================================
 // Test fixture
@@ -129,6 +135,182 @@ TEST_F(RtlPlannerIntegrationTest, FallsBackToMissionTakeoffWhenPathIsShorter)
 	EXPECT_TRUE(plan.selection.path.direction_reversed);
 	EXPECT_TRUE(plan.selection.path.u_turn_required);
 	EXPECT_NEAR(plan.selection.path.dist, 4040.f, kDistanceTolerance);
+}
+
+// WHY: Reverse fallback to the takeoff endpoint must land at the configured home AMSL reference,
+//      not at the takeoff climb altitude stored in the mission item.
+// WHAT: A MissionTakeoff fallback keeps the takeoff XY position but rewrites the goal altitude to home AMSL.
+TEST_F(RtlPlannerIntegrationTest, MissionTakeoffFallbackUsesHomeAltitudeReference)
+{
+	auto items = std::vector<mission_item_s> {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, 650.f),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, 670.f),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 5100.f, 0.f, 680.f),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 5200.f, 0.f, 640.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 40.f, 0.f, 655.f);
+	config = fwConfig();
+	config.home_altitude_amsl = 600.f;
+	config.vehicle_velocity_north = 15.f;
+	config.vehicle_velocity_east = 0.f;
+	config.vehicle_velocity_valid = true;
+
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason));
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::MissionTakeoff);
+	EXPECT_NEAR(plan.selection.goal_position.lat, items[0].lat, kLatLonToleranceDeg);
+	EXPECT_NEAR(plan.selection.goal_position.lon, items[0].lon, kLatLonToleranceDeg);
+	EXPECT_NEAR(plan.selection.goal_position.alt, 600.f, kAltitudeTolerance);
+}
+
+// WHY: Front-transition alignment after a far-off-route rejoin should point along the branch-in leg,
+//      not along the distant mission segment.
+// WHAT: A vehicle far east of the route receives a join yaw pointing west toward the projection.
+TEST_F(RtlPlannerIntegrationTest, JoinContextAlignsWithBranchInLegWhenFarFromRoute)
+{
+	auto items = std::vector<mission_item_s> {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon,   0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 300.f, 0.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 150.f, 100.f, kAlt);
+	config = fwConfig();
+
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_pos, 1, config, plan, &reason));
+	ASSERT_TRUE(PX4_ISFINITE(plan.join_context.desired_yaw));
+	EXPECT_LT(wrappedAngleError(plan.join_context.desired_yaw, -0.5f * M_PI_F), kYawToleranceRad);
+}
+
+// WHY: Front-transition alignment after a near-route rejoin should follow the resumed mission segment
+//      so the aircraft settles onto the route without an unnecessary heading kink.
+// WHAT: A vehicle already close to a northbound segment receives a northbound join yaw.
+TEST_F(RtlPlannerIntegrationTest, JoinContextAlignsWithMissionSegmentWhenNearRoute)
+{
+	auto items = std::vector<mission_item_s> {
+		makeTakeoffItemFromOffset(kBaseLat, kBaseLon,   0.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 300.f, 0.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 220.f, 5.f, kAlt);
+	config = fwConfig();
+
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_pos, 2, config, plan, &reason));
+	ASSERT_TRUE(PX4_ISFINITE(plan.join_context.desired_yaw));
+	EXPECT_FALSE(plan.selection.path.direction_reversed);
+	EXPECT_LT(wrappedAngleError(plan.join_context.desired_yaw, 0.f), kYawToleranceRad);
+}
+
+// WHY: Mission smart rejoin and normal-mode planner users must be able to rewind an exhausted DO_JUMP loop
+//      when that path is shorter than continuing to the other loop exit.
+// WHAT: On loop segment [2->0] near idx 2 with no repeats left -> first target becomes idx 2.
+TEST_F(RtlPlannerIntegrationTest, FindNominalPathToGoalChoosesShortestExhaustedLoopExit)
+{
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 2, 2),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f,   0.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+	config = defaultConfig();
+	config.last_flown_loop_segment.start.idx = 2;
+	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.end.idx = 0;
+	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.is_loop = true;
+	config.last_flown_loop_segment.loops_remaining = 0;
+
+	MissionRoutePlanner::ProjectionContext projection_context{};
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 95.f, kAlt);
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_pos, 0, config, projection_context, &reason));
+	ASSERT_TRUE(projection_context.loop_ctx.valid());
+	EXPECT_EQ(projection_context.mission_loops_remaining, 0);
+
+	const MissionRoutePlanner::Path path = planner.findNominalPathToGoal(4,
+					       projection_context.dist_along_to_route_end,
+					       projection_context, config);
+	ASSERT_TRUE(path.valid());
+	EXPECT_EQ(path.first_item_index, projection_context.loop_ctx.segment.start.idx);
+	EXPECT_FALSE(path.direction_reversed);
+}
+
+// WHY: When a DO_JUMP still has repeats remaining, normal mission rejoin must continue the active loop
+//      instead of rewinding it, even if the opposite exit would be shorter.
+// WHAT: On loop segment [2->0] with one repeat left -> first target stays at the loop end.
+TEST_F(RtlPlannerIntegrationTest, FindNominalPathToGoalKeepsLoopEndWhileRepeatsRemain)
+{
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 2, 1),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f,   0.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+	config = defaultConfig();
+	config.last_flown_loop_segment.start.idx = 2;
+	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.end.idx = 0;
+	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.is_loop = true;
+	config.last_flown_loop_segment.loops_remaining = 1;
+
+	MissionRoutePlanner::ProjectionContext projection_context{};
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 95.f, kAlt);
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_pos, 0, config, projection_context, &reason));
+	ASSERT_TRUE(projection_context.loop_ctx.valid());
+	EXPECT_GT(projection_context.mission_loops_remaining, 0);
+
+	const MissionRoutePlanner::Path path = planner.findNominalPathToGoal(4,
+					       projection_context.dist_along_to_route_end,
+					       projection_context, config);
+	ASSERT_TRUE(path.valid());
+	EXPECT_EQ(path.first_item_index, projection_context.loop_ctx.segment.end.idx);
+	EXPECT_FALSE(path.direction_reversed);
+}
+
+// WHY: RTL type 6 treats DO_JUMP items as geometry only and must ignore remaining loop counts
+//      when choosing the shortest return path.
+// WHAT: planRouteToGoal clears the effective loop counter and rewinds the loop when that exit is shorter.
+TEST_F(RtlPlannerIntegrationTest, PlanRouteToGoalIgnoresPendingLoopsForRtl)
+{
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 2, 1),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f,   0.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+	config = defaultConfig();
+	config.last_flown_loop_segment.start.idx = 2;
+	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.end.idx = 0;
+	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.last_flown_loop_segment.is_loop = true;
+	config.last_flown_loop_segment.loops_remaining = 1;
+
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 95.f, kAlt);
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason));
+	ASSERT_TRUE(plan.projection_context.loop_ctx.valid());
+	EXPECT_GT(plan.projection_context.loop_ctx.segment.loops_remaining, 0);
+	EXPECT_EQ(plan.projection_context.mission_loops_remaining, 0);
+	EXPECT_EQ(plan.selection.path.first_item_index, plan.projection_context.loop_ctx.segment.start.idx);
+	EXPECT_EQ(plan.selection.goal_type, MissionRoutePlanner::GoalType::MissionLand);
 }
 
 // WHY: A safe point with an invalid frame should be rejected, causing fallback to a mission endpoint.

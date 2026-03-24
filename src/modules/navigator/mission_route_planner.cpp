@@ -1038,6 +1038,25 @@ void MissionRoutePlanner::computeDesiredCourseVector(const ProjectionContext &pr
 	desired_course_east = desired_course_vec(1);
 }
 
+float MissionRoutePlanner::computeDesiredCourseYaw(const ProjectionContext &projection_context, bool will_fly_reverse) const
+{
+	float desired_course_north = NAN;
+	float desired_course_east = NAN;
+	computeDesiredCourseVector(projection_context, will_fly_reverse, desired_course_north, desired_course_east);
+
+	if (!PX4_ISFINITE(desired_course_north) || !PX4_ISFINITE(desired_course_east)) {
+		return NAN;
+	}
+
+	const matrix::Vector2f desired_course{desired_course_north, desired_course_east};
+
+	if (desired_course.norm_squared() <= FLT_EPSILON) {
+		return NAN;
+	}
+
+	return atan2f(desired_course_east, desired_course_north);
+}
+
 bool MissionRoutePlanner::uTurnRequired(const ProjectionContext &projection_context, const Config &config,
 					bool will_fly_reverse) const
 {
@@ -1135,7 +1154,7 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPath(uint16_t goal_se
 		const float path_a_cost = calculate_cost(path_a_raw_cost, path_a_u_turn_required);
 
 		// If loops remain, we must complete the current iteration — force Path A.
-		if (projection_context.loop_ctx.segment.loops_remaining > 0) {
+		if (projection_context.mission_loops_remaining > 0) {
 			path.first_item_index = projection_context.loop_ctx.segment.end.idx;
 			path.first_item_cmd = projection_context.loop_ctx.segment.end.nav_cmd;
 			path.direction_reversed = is_rev_from_loop_end;
@@ -1181,7 +1200,7 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPath(uint16_t goal_se
 		PX4_DEBUG("RTL SRP path on loop jump [A,B], loop_along[%.1f, %.1f], loops remaining: %u",
 			  static_cast<double>(projection_context.loop_ctx.along.start),
 			  static_cast<double>(projection_context.loop_ctx.along.end),
-			  static_cast<unsigned>(projection_context.loop_ctx.segment.loops_remaining));
+			  static_cast<unsigned>(projection_context.mission_loops_remaining));
 	}
 
 	PX4_DEBUG("RTL SRP path: idx: %d, cmd %u, rev? %u, u-turn? %u, path dist: %.1f, in_rad? %u",
@@ -1197,6 +1216,34 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPath(uint16_t goal_se
 		  static_cast<double>(goal_dist_along));
 
 	return path;
+}
+
+MissionRoutePlanner::Path MissionRoutePlanner::findNominalPathToGoal(uint16_t goal_segment_end_idx,
+		float goal_dist_along, const ProjectionContext &projection_context, const Config &config) const
+{
+	return findShortestPath(goal_segment_end_idx, goal_dist_along, projection_context, config,
+				PathDirectionMode::ForceNominal);
+}
+
+MissionRoutePlanner::Path MissionRoutePlanner::findReversePathToGoal(uint16_t goal_segment_end_idx,
+		float goal_dist_along, const ProjectionContext &projection_context, const Config &config) const
+{
+	return findShortestPath(goal_segment_end_idx, goal_dist_along, projection_context, config,
+				PathDirectionMode::ForceReverse);
+}
+
+MissionRoutePlanner::JoinContext MissionRoutePlanner::buildJoinContext(const ProjectionContext &projection_context,
+		const Path &path) const
+{
+	JoinContext join_context{};
+
+	if (!projection_context.valid() || !path.valid()) {
+		return join_context;
+	}
+
+	join_context.projection = projection_context.seg_candidate.projection;
+	join_context.desired_yaw = computeDesiredCourseYaw(projection_context, path.direction_reversed);
+	return join_context;
 }
 
 bool MissionRoutePlanner::directToSafePoint(const Position &safe_point_position, const Position &vehicle_position,
@@ -1350,18 +1397,20 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectMissionEndpointFallbac
 	Position takeoff_position{};
 	const bool path_to_takeoff_valid = have_takeoff
 					   && extractMissionPosition(takeoff_item, config.home_altitude_amsl, takeoff_position)
-					   && (path_to_takeoff = findShortestPath(takeoff_index, 0.f,
-							   projection_context, config,
-							   PathDirectionMode::ForceReverse)).valid();
+					   && (path_to_takeoff = findReversePathToGoal(takeoff_index, 0.f,
+							   projection_context, config)).valid();
+
+	if (path_to_takeoff_valid && PX4_ISFINITE(config.home_altitude_amsl)) {
+		takeoff_position.alt = config.home_altitude_amsl;
+	}
 
 	Path path_to_land{};
 	Position land_position{};
 	const bool path_to_land_valid = have_land
 					&& extractMissionPosition(land_item, config.home_altitude_amsl, land_position)
-					&& (path_to_land = findShortestPath(land_index,
+					&& (path_to_land = findNominalPathToGoal(land_index,
 							projection_context.dist_along_to_route_end,
-							projection_context, config,
-							PathDirectionMode::ForceNominal)).valid();
+							projection_context, config)).valid();
 
 	if (!path_to_takeoff_valid && !path_to_land_valid) {
 		return selection;
@@ -1443,9 +1492,10 @@ bool MissionRoutePlanner::planRouteToGoal(const Position &vehicle_position, int3
 		return false;
 	}
 
-	// SRP should choose the shortest exit even if a DO_JUMP still has repeats pending in normal mission execution.
+	// RTL treats DO_JUMP segments as route geometry only. Remaining loop counts from normal mission
+	// execution must not force the return path to finish the current loop iteration.
 	if (plan.projection_context.loop_ctx.valid()) {
-		plan.projection_context.loop_ctx.segment.loops_remaining = 0;
+		plan.projection_context.mission_loops_remaining = 0;
 	}
 
 	plan.selection = selectBestGoal(plan.projection_context, config);
@@ -1467,7 +1517,7 @@ bool MissionRoutePlanner::planRouteToGoal(const Position &vehicle_position, int3
 		return false;
 	}
 
-	plan.join_context.projection = plan.projection_context.seg_candidate.projection;
+	plan.join_context = buildJoinContext(plan.projection_context, plan.selection.path);
 
 	// Landing fallback keeps the current altitude if the landing item is already within XY acceptance radius.
 	if (plan.selection.goal_type == GoalType::MissionLand && plan.selection.path.in_first_item_acc_rad) {

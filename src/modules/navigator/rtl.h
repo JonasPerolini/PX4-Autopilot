@@ -141,6 +141,8 @@ private:
 	 *
 	 */
 	void findRtlDestination(DestinationType &destination_type, PositionYawSetpoint &destination, uint8_t &safe_point_index);
+	void findRtlDestinationForType(int rtl_type, DestinationType &destination_type,
+				       PositionYawSetpoint &destination, uint8_t &safe_point_index);
 
 	/**
 	 * @brief Find RTL destination if only safe points are considered

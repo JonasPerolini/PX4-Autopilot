@@ -55,7 +55,9 @@
 
 #include <gtest/gtest.h>
 
+#define private protected
 #include "mission_base.h"
+#undef private
 #include "navigation.h"
 #include "test_RTL_helpers.h"
 
@@ -159,6 +161,11 @@ public:
 		_load_failure_indices.clear();
 	}
 
+	void setMissionUploadVtolState(uint8_t vtol_state)
+	{
+		_vtol_state_on_mission_upload = vtol_state;
+	}
+
 	// Expose protected methods for testing.
 	using MissionBase::vtolTransitionActionForTarget;
 	using MissionBase::getVtolStateAtMissionIndex;
@@ -197,6 +204,7 @@ protected:
 		// Reset state between tests to prevent leakage from previous runs.
 		mission_base->loadTestMission({});
 		mission_base->setVehicleStatus(false, false, false);
+		mission_base->setMissionUploadVtolState(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
 	}
 
 	static constexpr double kLat = 47.397742;
@@ -227,6 +235,25 @@ TEST_F(MissionBaseVtolTest, DefaultStateIsMC)
 		  vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
 	EXPECT_EQ(mission_base->getVtolStateAtMissionIndex(1),
 		  vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
+}
+
+// WHY: Missions uploaded while the VTOL is already in FW mode must preserve that state when
+//      no explicit DO_VTOL_TRANSITION exists before the queried anchor.
+// WHAT: Two plain waypoints with upload state forced to FW -> both report VEHICLE_VTOL_STATE_FW.
+TEST_F(MissionBaseVtolTest, DefaultStateCanStartInFw)
+{
+	std::vector<mission_item_s> items = {
+		makePositionItem(kLat, kLon, kAlt),
+		makePositionItem(kLat + 0.001, kLon, kAlt),
+	};
+
+	mission_base->loadTestMission(items);
+	mission_base->setMissionUploadVtolState(vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW);
+
+	EXPECT_EQ(mission_base->getVtolStateAtMissionIndex(0),
+		  vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW);
+	EXPECT_EQ(mission_base->getVtolStateAtMissionIndex(1),
+		  vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW);
 }
 
 // WHY: getVtolStateAtMissionIndex must detect a DO_VTOL_TRANSITION to FW and report

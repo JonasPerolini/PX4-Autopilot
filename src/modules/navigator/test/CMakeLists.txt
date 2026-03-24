@@ -38,3 +38,4 @@ px4_add_functional_gtest(SRC test_RTL_safe_point.cpp LINKLIBS navigator_mission_
 px4_add_functional_gtest(SRC test_RTL_planner_integration.cpp LINKLIBS navigator_mission_route_planner)
 px4_add_functional_gtest(SRC test_mission_base_vtol.cpp LINKLIBS modules__navigator)
 px4_add_functional_gtest(SRC test_RTL_mission_safe_point_follow.cpp LINKLIBS modules__navigator)
+px4_add_functional_gtest(SRC test_navigator_route_rejoin_and_rtl.cpp LINKLIBS modules__navigator)

@@ -85,7 +85,6 @@ private:
 
 	void updateMissionRouteCache();
 	void syncMissionRouteState();
-	bool trySetRouteJoinOnActivation(bool resume_mission_on_previous);
 
 	/**
 	 * Save current mission state to dataman
@@ -99,6 +98,10 @@ private:
 	void handleVtolTransition(WorkItemType &new_work_item_type, mission_item_s next_mission_items[],
 				  size_t &num_found_items);
 
+protected:
+	bool trySetRouteJoinOnActivation(bool resume_mission_on_previous);
+
+private:
 	bool _need_mission_save{false};
 	MissionRoutePlanner::Segment _last_flown_loop_segment{};
 	uint32_t _route_state_mission_id{0};

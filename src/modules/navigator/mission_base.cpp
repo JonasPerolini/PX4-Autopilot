@@ -70,6 +70,12 @@ MissionBase::MissionBase(Navigator *navigator, int32_t dataman_cache_size_signed
 	_mission_pub.advertise();
 }
 
+bool MissionBase::vehicleInFwLikeState(const vehicle_status_s &vehicle_status)
+{
+	return vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING
+	       || vehicle_status.in_transition_to_fw;
+}
+
 void
 MissionBase::updateDatamanCache()
 {
@@ -126,6 +132,10 @@ void MissionBase::onMissionUpdate(bool has_mission_items_changed)
 	if (has_mission_items_changed) {
 		_dataman_cache.invalidate();
 		_load_mission_index = -1;
+		_vehicle_status_sub.update();
+		_vtol_state_on_mission_upload = (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING)
+						? vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC
+						: vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW;
 
 		if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE)
 		    || (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)) {
@@ -764,17 +774,18 @@ bool MissionBase::position_setpoint_equal(const position_setpoint_s *p1, const p
 
 }
 
-void MissionBase::setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context, bool requires_transition)
+void MissionBase::setupJoinRoute(const MissionRoutePlanner::JoinContext &join_context,
+				 VtolTransitionAction transition_action)
 {
 	_route_join_context = join_context;
-	_join_requires_back_transition = requires_transition;
+	_join_transition_action = transition_action;
 	_work_item_type = WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE;
 }
 
 void MissionBase::resetJoinRouteState()
 {
 	_route_join_context = {};
-	_join_requires_back_transition = false;
+	_join_transition_action = VtolTransitionAction::None;
 }
 
 bool MissionBase::handleJoinRouteState(position_setpoint_triplet_s *pos_sp_triplet,
@@ -803,13 +814,14 @@ bool MissionBase::handleJoinRouteState(position_setpoint_triplet_s *pos_sp_tripl
 			join_item.altitude = _navigator->get_global_position()->alt;
 		}
 
-		if (_join_requires_back_transition) {
+		if (_join_transition_action == VtolTransitionAction::BackTransition) {
 			join_item.vtol_back_transition = true;
 
-		} else if ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
-			   || (_vehicle_status_sub.get().in_transition_mode
-			       && (_vehicle_status_sub.get().in_transition_to_fw == false))) {
-			join_item.acceptance_radius = 2.f * _navigator->get_acceptance_radius();
+		} else if ((_join_transition_action == VtolTransitionAction::None)
+			   && vehicleInFwLikeState(_vehicle_status_sub.get())) {
+			// Allow fixed-wing style joins to arc onto the route instead of overshooting the exact
+			// projection and then flying backward to recover it.
+			join_item.acceptance_radius = kJoinRouteFlyByAcceptanceRadiusScale * _navigator->get_acceptance_radius();
 		}
 
 		mission_item_to_position_setpoint(join_item, &pos_sp_triplet->current);
@@ -834,12 +846,31 @@ bool MissionBase::handleJoinRouteState(position_setpoint_triplet_s *pos_sp_tripl
 	}
 
 	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN) {
-		if (_join_requires_back_transition
-		    && ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
-			|| _vehicle_status_sub.get().in_transition_to_fw)
-		    && (_land_detected_sub.get().landed == false)) {
-			set_vtol_transition_item(&_mission_item, vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC);
+		const bool landed = _land_detected_sub.get().landed;
+		const bool currently_fw = vehicleInFwLikeState(_vehicle_status_sub.get());
+		const bool transition_still_required = !landed
+						       && ((_join_transition_action == VtolTransitionAction::BackTransition && currently_fw)
+								       || (_join_transition_action == VtolTransitionAction::FrontTransition && !currently_fw));
+
+		if (transition_still_required) {
+			const uint8_t target_state = (_join_transition_action == VtolTransitionAction::FrontTransition)
+						     ? vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW
+						     : vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
+			set_vtol_transition_item(&_mission_item, target_state);
 			_mission_item.yaw = NAN;
+
+			if (_join_transition_action == VtolTransitionAction::FrontTransition) {
+				_mission_item.yaw = _route_join_context.desired_yaw;
+
+				if (!PX4_ISFINITE(_mission_item.yaw)) {
+					const auto *local_position = _navigator->get_local_position();
+
+					if ((local_position != nullptr) && PX4_ISFINITE(local_position->heading)) {
+						_mission_item.yaw = local_position->heading;
+					}
+				}
+			}
+
 			pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
 			pos_sp_triplet->previous.valid = false;
 			issue_command(_mission_item);
@@ -864,10 +895,13 @@ bool MissionBase::handleJoinRouteState(position_setpoint_triplet_s *pos_sp_tripl
 bool MissionBase::advanceJoinRouteState()
 {
 	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE) {
-		if (_join_requires_back_transition
-		    && ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
-			|| _vehicle_status_sub.get().in_transition_to_fw)
-		    && (_land_detected_sub.get().landed == false)) {
+		const bool landed = _land_detected_sub.get().landed;
+		const bool currently_fw = vehicleInFwLikeState(_vehicle_status_sub.get());
+		const bool transition_still_required = !landed
+						       && ((_join_transition_action == VtolTransitionAction::BackTransition && currently_fw)
+								       || (_join_transition_action == VtolTransitionAction::FrontTransition && !currently_fw));
+
+		if (transition_still_required) {
 			_work_item_type = WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN;
 
 		} else {
@@ -1302,7 +1336,8 @@ uint8_t MissionBase::getVtolStateAtMissionIndex(int32_t anchor_index)
 		mission_item_s mission_item{};
 
 		if (!loadMissionItemFromCache(index, mission_item)) {
-			break;
+			PX4_WARN("Failed to read mission item %d for VTOL state check", static_cast<int>(index));
+			return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
 		}
 
 		if (mission_item.nav_cmd == NAV_CMD_DO_VTOL_TRANSITION) {
@@ -1317,7 +1352,7 @@ uint8_t MissionBase::getVtolStateAtMissionIndex(int32_t anchor_index)
 		}
 	}
 
-	return vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
+	return _vtol_state_on_mission_upload;
 }
 
 MissionBase::VtolTransitionAction MissionBase::vtolTransitionActionForTarget(int32_t target_index,

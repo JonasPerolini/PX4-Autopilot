@@ -8,7 +8,7 @@ This mode is intended for operations where the mission itself is the safest know
 
 ::: info
 - If route planning succeeds but no [safety points (rally points)](../flying/plan_safety_points.md) are usable, PX4 falls back to the closer mission endpoint (landing or takeoff) while staying in the route-based return logic.
-- Regardless of the direction of flight, the vehicle skips `DO_JUMP` commands. Note however that the route planner evaluates jump segments to accurately project the vehicle segment.
+- During execution, route following skips `DO_JUMP` items as mission commands. During planning, jump segments are still evaluated as route geometry, but RTL ignores remaining loop counts and chooses the shorter continue-vs-rewind path through the loop exit.
 - If the mission cannot be projected, the route cache is not ready, or the mission exceeds `CONFIG_RTL_MISSION_CACHE_SIZE`, PX4 falls back to the same direct RTL destination selection used by `RTL_TYPE=3`.
 :::
 
@@ -45,7 +45,7 @@ When `RTL_TYPE=6` is evaluated, PX4 performs these steps:
 2. Project all safe points onto the mission route.
 3. Score the reachable safe-point projections by along-route cost.
 4. If route planning succeeds but no safe point is usable, fall back to the closer mission endpoint (takeoff or land).
-5. If route planning itself cannot run, fall back to direct RTL destination selection.
+5. If route planning itself cannot run, fall back to the same direct RTL destination selection used by `RTL_TYPE=3`.
 6. Build a route-join, route-follow, and branch-off plan from the selected result.
 
 ### Vehicle Projection
@@ -97,6 +97,8 @@ Safe points are pre-filtered once before route scoring:
 - For VTOL in FW mode with [RTL_APPR_FORCE](../advanced_config/parameter_reference.md#RTL_APPR_FORCE)=1, only safe points with a valid VTOL landing approach remain eligible.
 - Every remaining valid safe point gets up to three local-minimum route projections.
 
+The route-based scorer evaluates a fixed-size batch of uploaded safe points; see [Safe-Point Evaluation Limit](#safe-point-evaluation-limit).
+
 ### Direct-to-Safe-Point Shortcut
 
 Multicopters (and VTOLs currently in MC mode) that are already within `NAV_ACC_RAD` of a safe point may skip route following and navigate straight to the safe point to land there.
@@ -116,7 +118,7 @@ If route planning succeeds but no safe point can be selected, Route Safe Point R
 - The mission landing endpoint, flown in the nominal direction.
 - The mission takeoff endpoint, flown in reverse.
 
-If route planning itself cannot run, PX4 falls back to direct RTL destination selection instead of staying in the route-following executor.
+If route planning itself cannot run, PX4 falls back to the same direct RTL destination selection used by `RTL_TYPE=3` instead of staying in the route-following executor.
 
 
 ## Execution Stages
@@ -124,7 +126,7 @@ If route planning itself cannot run, PX4 falls back to direct RTL destination se
 The active executor runs through these stages:
 
 1. **[Join route](#join-route)**: fly to a virtual branch-in waypoint at the [vehicle projection](#vehicle-projection) point.
-2. **Post-join transition**: if the new mission segment is expected to be flown in multi-copter mode, apply any required VTOL back-transition before following the route.
+2. **Post-join transition**: if the resumed mission segment requires a different VTOL state, apply the required front-transition or back-transition before following the route.
 3. **[Follow route](#route-following)**: follow the mission path in nominal or reverse direction.
 4. **Transition during route**: if the next route segment requires a different VTOL state, apply the transition and resume route following.
 5. If a safe point is available:
@@ -136,7 +138,9 @@ The active executor runs through these stages:
 
 The join point is a virtual `NAV_CMD_WAYPOINT` placed at the vehicle projection.
 
-- If the target route segment requires MC flight while the vehicle is currently in FW mode, the join context requests a VTOL back-transition after the join waypoint is reached.
+- If the target route segment requires a different VTOL state than the current vehicle state, the join context requests the required front-transition or back-transition after the join waypoint is reached.
+- For fixed-wing and VTOL-in-FW joins that stay in FW, PX4 doubles the join waypoint acceptance radius so the vehicle can curve onto the route instead of flying backward to hit the exact branch-in point.
+- For post-join front-transitions, the requested yaw follows the planned rejoin geometry: if the vehicle is still far from the route or the resumed segment is too short, it aligns with the current-position to branch-in leg; otherwise it aligns with the resumed mission segment direction.
 - If the selected goal is already within the acceptance radius of a landing endpoint, the join altitude requirement is skipped so landing can start immediately.
 - If the join projection is already within acceptance radius of the branch-off projection, PX4 goes straight to landing instead of following a zero-length route segment.
 
@@ -189,12 +193,15 @@ CONFIG_RTL_MISSION_CACHE_SIZE=500
 For most real-world operations, 300 waypoints is sufficient. If your mission requires more waypoints, either increase `CONFIG_RTL_MISSION_CACHE_SIZE` for your board or consider splitting the mission into shorter segments.
 :::
 
+## Safe-Point Evaluation Limit
+
+The route-based scorer used by `RTL_TYPE=6` evaluates at most 64 uploaded safe points per planning cycle. This limit is independent of the mission cache size and comes from the 64-bit safe-point eligibility mask used inside `MissionRoutePlanner`. Additional uploaded safe points remain stored in dataman, but they are not considered by the type-6 route scorer. Direct safe-point RTL modes still use their own direct-distance selection path.
+
 ## Current Limitations
 
 - Missions exceeding `CONFIG_RTL_MISSION_CACHE_SIZE` items (default 300) are not supported; PX4 falls back to direct-path RTL.
 - Safe-point scoring currently minimizes along-route distance only; it does not yet add the final branch-off leg from the mission route to the safe point into the cost.
 - If several safe points are already within the direct-to-safe-point shortcut radius, the first qualifying safe point in upload order is used.
-- Mission smart route rejoin does not yet perform a front-transition before resuming a fixed-wing segment; only the post-join back-transition path is implemented.
 - Geofence-aware pruning for vehicle and safe-point projections is not yet implemented.
 - No dedicated reverse-turn execution module: U-turns are penalized in path scoring but not executed as a specific maneuver.
 
@@ -238,7 +245,7 @@ Executor stages:       Idle → FollowRoute ⇄ TransitionDuringRoute → Branch
 ```
 
 - `JoinRoute`: a shared `MissionBase` work item that flies the virtual branch-in waypoint.
-- `TransitionAfterJoin`: a shared `MissionBase` work item that performs a VTOL back-transition after the join when required.
+- `TransitionAfterJoin`: a shared `MissionBase` work item that performs the required VTOL front-transition or back-transition after the join when needed.
 - `FollowRoute`: walk mission items as geometry (skipping `DO_JUMP`), advancing via `advanceRouteTarget()`. When route traversal is exhausted (no more waypoints in either direction), the vehicle holds position if not already landed.
 - `TransitionDuringRoute`: a VTOL transition was detected mid-route. The transition command is issued once, and the stage waits for completion before returning to `FollowRoute`. This prevents transition command spamming.
 - `BranchOff`: replace the mission target with the virtual branch-off waypoint.
@@ -262,6 +269,15 @@ Mission mode and `RtlMissionSafePointFollow` now determine the final target inde
 - `MissionBase` publishes the first active setpoint on activation, so the join route must already be armed to avoid a double publication of first the nominal waypoint and then the virtual branch-in waypoint.
 
 The result is a single clean publication on activation and correct replay of mission history when resuming after a route rejoin.
+
+### Shared Smart Rejoin Path Selection
+
+Mission smart rejoin uses the same route-selection helper as `RTL_TYPE=6` when it needs to resume the mission after a deviation, but unlike RTL it preserves the active mission loop count:
+
+- The resumed target index comes from the shortest valid nominal path to the mission landing goal instead of hard-coding the projected segment end.
+- If the projection lies on a `DO_JUMP` loop segment with repeats remaining, the resumed path continues to the loop segment end.
+- If the loop is exhausted, the planner compares continuing versus rewinding through the loop exit and chooses the shorter path.
+- The shared join-route work item applies the required front-transition or back-transition after the join waypoint, using the same branch-in-leg versus mission-segment alignment rule described above.
 
 ### Provider Interface
 

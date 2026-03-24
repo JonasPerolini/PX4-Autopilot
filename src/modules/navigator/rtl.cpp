@@ -59,10 +59,10 @@ static_assert(DM_KEY_SAFE_POINTS_MAX <= MissionRoutePlanner::MAX_SAFE_POINT_BATC
 
 // Named constants for RTL_TYPE parameter values (must match @value tags in rtl_params.c).
 static constexpr int RTL_TYPE_MISSION_FAST = 2;
+static constexpr int RTL_TYPE_DIRECT_WITH_MISSION_LAND = 3;
 static constexpr int RTL_TYPE_MISSION_FAST_OR_REVERSE = 4;
 static constexpr int RTL_TYPE_SAFE_POINT_DIRECT = 5;
 static constexpr int RTL_TYPE_ROUTE_SAFE_POINT = 6;
-
 
 
 RTL::RTL(Navigator *navigator) :
@@ -323,10 +323,7 @@ void RTL::setRtlTypeAndDestination()
 	const MissionRoutePlanner::Plan cached_route_safe_point_plan = _route_safe_point_plan;
 	_route_safe_point_plan = {};
 	const bool cached_should_go_straight_to_safe_point = _should_go_straight_to_safe_point;
-
-	if (_param_rtl_type.get() != RTL_TYPE_ROUTE_SAFE_POINT) {
-		_should_go_straight_to_safe_point = false;
-	}
+	_should_go_straight_to_safe_point = false;
 
 	// init destination with Home (used also with Type 2 and 4 as backup)
 	DestinationType destination_type = DestinationType::DESTINATION_TYPE_HOME;
@@ -471,8 +468,7 @@ void RTL::setRtlTypeAndDestination()
 						_route_safe_point_plan.join_context.skip_altitude_requirement = true;
 					}
 
-					_should_go_straight_to_safe_point = cached_should_go_straight_to_safe_point
-									    || _route_safe_point_plan.selection.direct_to_safe_point;
+					_should_go_straight_to_safe_point = _route_safe_point_plan.selection.direct_to_safe_point;
 
 					PX4_DEBUG("RTL type 6 planned goal=%s target=%d rev=%u direct=%u",
 						  MissionRoutePlanner::goalTypeString(_route_safe_point_plan.selection.goal_type),
@@ -515,7 +511,7 @@ void RTL::setRtlTypeAndDestination()
 
 		} else {
 			_should_go_straight_to_safe_point = false;
-			findRtlDestination(destination_type, destination, safe_point_index);
+			findRtlDestinationForType(RTL_TYPE_DIRECT_WITH_MISSION_LAND, destination_type, destination, safe_point_index);
 
 			if (destination_type == DestinationType::DESTINATION_TYPE_MISSION_LAND) {
 				new_rtl_type = RtlType::RTL_DIRECT_MISSION_LAND;
@@ -584,6 +580,7 @@ void RTL::setRtlTypeAndDestination()
 	// because it only caches the plan and branch-off index without resetting the stage.
 	if (new_rtl_type == RtlType::RTL_MISSION_SAFE_POINT_FOLLOW && _rtl_mission_type_handle) {
 		_rtl_mission_type_handle->setRoutePlan(_route_safe_point_plan);
+		_rtl_mission_type_handle->setShouldGoStraightToGoal(_should_go_straight_to_safe_point);
 	}
 
 	_rtl_type = new_rtl_type;
@@ -647,7 +644,8 @@ PositionYawSetpoint RTL::findClosestSafePoint(float min_dist, uint8_t &safe_poin
 	return safe_point;
 }
 
-void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpoint &destination, uint8_t &safe_point_index)
+void RTL::findRtlDestinationForType(int rtl_type, DestinationType &destination_type, PositionYawSetpoint &destination,
+				    uint8_t &safe_point_index)
 {
 	const bool vtol_in_rw_mode = _vehicle_status_sub.get().is_vtol
 				     && (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING);
@@ -657,10 +655,10 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 
 	float min_dist = FLT_MAX;
 
-	if (_param_rtl_type.get() != 5) {
+	if (rtl_type != RTL_TYPE_SAFE_POINT_DIRECT) {
 		_home_has_land_approach = hasVtolLandApproach(destination);
 
-		const bool prioritize_safe_points_over_home = ((_param_rtl_type.get() == 1) && !vtol_in_rw_mode);
+		const bool prioritize_safe_points_over_home = ((rtl_type == 1) && !vtol_in_rw_mode);
 		const bool required_approach_missing_for_home = (vtol_in_fw_mode && (_param_rtl_appr_force.get() == 1) && !_home_has_land_approach);
 
 		// Set minimum distance to maximum value when RTL_TYPE is set to 1 and we are not in RW mode or we force approach landing for vtol in fw and it is not defined for home.
@@ -672,7 +670,8 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 		}
 
 		// Mission landing
-		if (((_param_rtl_type.get() == 1) || (_param_rtl_type.get() == 3) || (fabsf(FLT_MAX - min_dist) < FLT_EPSILON)) && hasMissionLandStart()) {
+		if (((rtl_type == 1) || (rtl_type == RTL_TYPE_DIRECT_WITH_MISSION_LAND)
+		     || (fabsf(FLT_MAX - min_dist) < FLT_EPSILON)) && hasMissionLandStart()) {
 			MissionRouteCache *mission_route_cache = _navigator->get_mission_route_cache();
 			mission_item_s land_mission_item{};
 			int32_t land_index = -1;
@@ -688,7 +687,7 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 				const float dist{get_distance_to_next_waypoint(_global_pos_sub.get().lat, _global_pos_sub.get().lon, land_mission_item.lat, land_mission_item.lon)};
 
 				if ((dist + MIN_DIST_THRESHOLD) < min_dist) {
-					if (_param_rtl_type.get() != 0) {
+					if (rtl_type != 0) {
 						min_dist = dist;
 
 					} else {
@@ -710,7 +709,7 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 		destination = safe_point;
 		destination_type = DestinationType::DESTINATION_TYPE_SAFE_POINT;
 
-	} else if (_param_rtl_type.get() == RTL_TYPE_SAFE_POINT_DIRECT) {
+	} else if (rtl_type == RTL_TYPE_SAFE_POINT_DIRECT) {
 		// Safe points only but no valid safe point, fallback to last position with valid data link
 		for (auto &telemetry_status :  _telemetry_status_subs) {
 			telemetry_status_s telemetry;
@@ -738,6 +737,11 @@ void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpo
 
 		destination_type = DestinationType::DESTINATION_TYPE_LAST_LINK_POSITION;
 	}
+}
+
+void RTL::findRtlDestination(DestinationType &destination_type, PositionYawSetpoint &destination, uint8_t &safe_point_index)
+{
+	findRtlDestinationForType(_param_rtl_type.get(), destination_type, destination, safe_point_index);
 }
 
 void RTL::setLandPosAsDestination(PositionYawSetpoint &rtl_position, mission_item_s &land_mission_item) const
@@ -864,6 +868,7 @@ void RTL::initRtlMissionType(RtlType new_rtl_type, float rtl_alt)
 
 		if (_rtl_mission_type_handle) {
 			_rtl_mission_type_handle->setRoutePlan(_route_safe_point_plan);
+			_rtl_mission_type_handle->setShouldGoStraightToGoal(_should_go_straight_to_safe_point);
 			_rtl_mission_type_handle->initialize();
 		}
 
