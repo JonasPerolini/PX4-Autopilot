@@ -111,8 +111,8 @@ const char *MissionRoutePlanner::goalTypeString(GoalType goal_type)
 
 float MissionRoutePlanner::getAbsoluteAltitudeForMissionItem(const mission_item_s &mission_item, float home_altitude_amsl)
 {
-	if (mission_item.altitude_is_relative && PX4_ISFINITE(home_altitude_amsl)) {
-		return mission_item.altitude + home_altitude_amsl;
+	if (mission_item.altitude_is_relative) {
+		return PX4_ISFINITE(home_altitude_amsl) ? mission_item.altitude + home_altitude_amsl : NAN;
 	}
 
 	return mission_item.altitude;
