@@ -135,14 +135,14 @@ bool MissionRouteCache::syncMissionItem(const mission_s &mission, int32_t index,
 	bool mission_updated = _dataman_cache_mission.updateCachedItem(static_cast<dm_item_t>(_mission_dataman_id), index,
 			       reinterpret_cast<const uint8_t *>(&mission_item), sizeof(mission_item));
 
-	bool land_updated = false;
+	bool land_updated = true;
 
 	if (index == _mission_land_index) {
 		land_updated = _dataman_cache_land_item.updateCachedItem(static_cast<dm_item_t>(_mission_land_dataman_id), index,
 				reinterpret_cast<const uint8_t *>(&mission_item), sizeof(mission_item));
 	}
 
-	return mission_updated || land_updated;
+	return mission_updated && land_updated;
 }
 
 void MissionRouteCache::updateMissionCache(const mission_s &mission)
