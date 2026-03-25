@@ -95,7 +95,7 @@ TEST_F(RtlSafePointTest, PrefersLowestOverallPathCost)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 5.f, kAlt);
 
 	// WHEN: Vehicle projects onto segment [0-1] near the start.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -129,7 +129,7 @@ TEST_F(RtlSafePointTest, IncludesBranchOffLegInSafePointRanking)
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -162,7 +162,7 @@ TEST_F(RtlSafePointTest, SupportsDirectToSafePoint)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
 	// WHEN: Vehicle is near the safe point within direct acceptance radius.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -201,7 +201,7 @@ TEST_F(RtlSafePointTest, ReturnsEmptyWhenAllSafePointsInvalid)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
 	// WHEN: Vehicle projects onto the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -231,7 +231,7 @@ TEST_F(RtlSafePointTest, RelativeAltitudeSafePointUsesHomeAltitude)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
 	// WHEN: The vehicle projects onto the route and selects the rally point.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -265,7 +265,7 @@ TEST_F(RtlSafePointTest, RelativeAltitudeSafePointRequiresFiniteHomeAltitude)
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
 	// WHEN: The planner evaluates the safe point without a valid AMSL reference.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -293,7 +293,7 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestBehindReverse_MC)
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
 
 	// WHEN: Vehicle at mission_index=2 projects onto the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -318,7 +318,7 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestForwardAhead_MC)
 		makePositionAbsolute(46.10795279737903, 2.299475977516394, 454.4f);
 
 	// WHEN: Vehicle at mission_index=5 projects onto the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 5, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 5, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -342,7 +342,7 @@ TEST_F(RtlSafePointTest, DefaultMission_WithinAcceptanceRadius)
 		makePositionAbsolute(46.09681253236241, 2.2993209050608376, 838.48f);
 
 	// WHEN: Vehicle at mission_index=1 is within acceptance radius of rally 4.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -367,7 +367,7 @@ TEST_F(RtlSafePointTest, DefaultMission_AllBehind_MC)
 		makePositionAbsolute(46.112843317707494, 2.3059421291432525, 455.4f);
 
 	// WHEN: Vehicle at mission_index=15 with all rally points behind.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 15, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 15, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -395,7 +395,7 @@ TEST_F(RtlSafePointTest, DefaultMission_InvalidRallyPointSkipped)
 		makePositionAbsolute(46.11057010025454, 2.2972410253925846, 461.4f);
 
 	// WHEN: Vehicle at mission_index=13 with corrupted rally 0.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -425,7 +425,7 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestBehindReverse_FW)
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
 
 	// WHEN: Vehicle at mission_index=2 projects onto the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -449,7 +449,7 @@ TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle at N+500, flying north along the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -476,7 +476,7 @@ TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: The planner evaluates a vehicle that is already committed to a front transition.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -501,7 +501,7 @@ TEST_F(RtlSafePointTest, MCNoUturnPenaltySelectsClosestReverse)
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: MC vehicle at N+500, flying north along the route.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -530,7 +530,7 @@ TEST_F(RtlSafePointTest, CornerMission_RallyOnCorner_MC)
 		makePositionAbsolute(46.103348739288705, 2.3235968076446945, 600.f);
 
 	// WHEN: Vehicle at mission_index=2 on the corner mission.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -556,7 +556,7 @@ TEST_F(RtlSafePointTest, CornerMission_CornerProjectionHandled_FW)
 		makePositionAbsolute(46.103348739288705, 2.3235968076446945, 600.f);
 
 	// WHEN: FW vehicle at mission_index=2 on the corner mission.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -587,7 +587,7 @@ TEST_F(RtlSafePointTest, CornerMission_BackNoTransition_MC)
 		makePositionAbsolute(46.102107841234414, 2.31680521490218, 650.f);
 
 	// WHEN: Vehicle at mission_index=7.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 7, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 7, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -611,7 +611,7 @@ TEST_F(RtlSafePointTest, CornerMission_SmallSegmentFront_MC)
 		makePositionAbsolute(46.10361319095525, 2.3183349874167636, 510.f);
 
 	// WHEN: Vehicle at mission_index=13.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -635,7 +635,7 @@ TEST_F(RtlSafePointTest, CornerMission_ReverseCornerScenarioSelectsRally2OnSegme
 		makePositionAbsolute(46.10205080248656, 2.318838207366314, 650.f);
 
 	// WHEN: Vehicle at mission_index=5.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 5, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 5, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -665,7 +665,7 @@ TEST_F(RtlSafePointTest, CornerMission_LandCornerScenarioSelectsRally6OnSegment1
 		makePositionAbsolute(46.10368934085859, 2.3183612137416754, 510.f);
 
 	// WHEN: Vehicle at mission_index=13 with FW config.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 13, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -694,7 +694,7 @@ TEST_F(RtlSafePointTest, CornerMission_LoopSegmentIsHandled)
 		makePositionAbsolute(46.10264815827885, 2.321939748532329, 600.f);
 
 	// WHEN: Vehicle at mission_index=3.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 3, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 3, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -738,7 +738,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_Simple)
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 20.f, 5.f, kAlt);
 
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	// WHEN: Safe point selection is run, counting provider accesses.
 	provider.resetCounters();
@@ -764,7 +764,7 @@ TEST_F(RtlSafePointTest, ScansMissionOnceForBatch_DefaultDataset)
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
 
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 2, config, ctx, reason));
 
 	// WHEN: Safe point selection is run on the default dataset.
 	provider.resetCounters();
@@ -803,7 +803,7 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
 	config.usable_safe_point_bitmask = 1ULL << 1;
 
 	// WHEN: Safe-point selection runs with only safe point 1 marked as usable.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -837,7 +837,7 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskCanRejectAllSafePoints)
 	config.usable_safe_point_bitmask = 0;
 
 	// WHEN: Safe-point selection runs with no usable safe-point bits enabled.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -937,7 +937,7 @@ TEST_F(RtlSafePointTest, HandlesLoopWithRemainingIterations)
 		makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt);
 
 	// WHEN: planRouteToGoal is called with pending loop iterations.
-	ASSERT_TRUE(planner.planRouteToGoal(vehicle_position, 1, config, plan, &failure_reason));
+	ASSERT_TRUE(planner.planRouteToGoal(vehicle_position, 1, config, plan, failure_reason));
 
 	// THEN: Plan is valid and a goal is found.
 	ASSERT_TRUE(plan.valid());
@@ -960,7 +960,7 @@ TEST_F(RtlSafePointTest, FWWithZeroVelocityPicksShortestPath)
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle without valid velocity data.
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -983,7 +983,7 @@ TEST_F(RtlSafePointTest, FWWithOrthogonalVelocityNoUturn)
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
 	// WHEN: FW vehicle flying east (orthogonal to north-south route).
-	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, nullptr));
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, uturn_penalty_dataset::kMissionIndex, config, ctx, reason));
 
 	const MissionRoutePlanner::Selection selection = planner.selectSafePoint(ctx, config);
 
@@ -1024,7 +1024,7 @@ TEST_F(RtlSafePointTest, VehicleInsideDoJumpLoopGetsValidPlan)
 	MissionRoutePlanner::Plan plan{};
 
 	// WHEN: The planner builds a safe-point return from inside the loop.
-	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, reason);
 
 	// THEN: The plan remains loop-aware and produces a complete safe-point branch-off.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
@@ -1063,7 +1063,7 @@ TEST_F(RtlSafePointTest, LoopScenarioSelectsRally3OnSegment7To9)
 	MissionRoutePlanner::Plan plan{};
 
 	// WHEN: The planner evaluates a safe point that projects onto the loop edge itself.
-	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, 7, config, plan, reason);
 
 	// THEN: The planner chooses the cheapest reachable rally and keeps a valid nominal branch-off segment.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
@@ -1111,7 +1111,7 @@ TEST_F(RtlSafePointTest, ExhaustedDoJumpTreatedAsStraightThrough)
 	MissionRoutePlanner::Plan plan{};
 
 	// WHEN: The planner scans the route after the DO_JUMP has been exhausted.
-	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, reason);
 
 	// THEN: Planning stays on the nominal route and still returns a complete safe-point plan.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
@@ -1154,7 +1154,7 @@ TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
 	MissionRoutePlanner::Plan plan{};
 
 	// WHEN: A safe-point plan is built and the cached branch-off leg is checked.
-	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, reason);
 
 	// THEN: The branch-off projection lies on the branch leg used by the executor.
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
@@ -1193,7 +1193,7 @@ TEST_P(RtlSafePointDirectShortcutTest, PlansDirectShortcutOnlyForMulticopter)
 	config.vehicle_velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
-	bool ok = planner.planRouteToGoal(vehicle_pos, direct_to_safe_point_dataset::kMissionIndex, config, plan, &reason);
+	bool ok = planner.planRouteToGoal(vehicle_pos, direct_to_safe_point_dataset::kMissionIndex, config, plan, reason);
 
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
 	EXPECT_TRUE(plan.selection.found);

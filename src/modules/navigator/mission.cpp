@@ -185,7 +185,7 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 	MissionRoutePlanner::Position vehicle_position{global_position->lat, global_position->lon, global_position->alt};
 
 	if (planner.collectVehicleProjection(vehicle_position, _mission.current_seq, config, projection_context,
-					     &failure_reason) == false) {
+					     failure_reason) == false) {
 		PX4_ERR("Mission route rejoin unavailable: %s", MissionRoutePlanner::failureReasonString(failure_reason));
 		return false;
 	}
@@ -204,7 +204,11 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 		return false;
 	}
 
-	_last_flown_loop_segment = projection_context.seg_candidate.segment;
+	// Keep this cache loop-only. Nominal segments are already implied by current_seq,
+	// but an active DO_JUMP edge must survive the jump so later replans can stay anchored on it.
+	_last_flown_loop_segment = projection_context.seg_candidate.segment.validLoop()
+				   ? projection_context.seg_candidate.segment
+				   : MissionRoutePlanner::Segment{};
 	setMissionIndex(path.first_item_index);
 	_is_current_planned_mission_item_valid = isMissionValid();
 
@@ -219,6 +223,12 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 	const VtolTransitionAction join_transition_action = vtolTransitionActionForTarget(path.first_item_index,
 			path.direction_reversed);
 	setupJoinRoute(join_context, join_transition_action);
+
+	PX4_INFO("Mission route join: target=%d rev=%u vtol=%u skip_alt=%u",
+		 static_cast<int>(path.first_item_index),
+		 static_cast<unsigned>(path.direction_reversed),
+		 static_cast<unsigned>(join_transition_action),
+		 static_cast<unsigned>(join_context.skip_altitude_requirement));
 
 	mavlink_log_info(_navigator->get_mavlink_log_pub(), "Rejoining mission route\t");
 	return true;
@@ -289,7 +299,7 @@ void Mission::setActiveMissionItems()
 	position_setpoint_triplet_s *pos_sp_triplet = _navigator->get_position_setpoint_triplet();
 	const position_setpoint_s current_setpoint_copy = pos_sp_triplet->current;
 
-	if (handleJoinRouteState(pos_sp_triplet, current_setpoint_copy)) {
+	if (handleJoinRouteWorkItems(pos_sp_triplet, current_setpoint_copy)) {
 		return;
 	}
 

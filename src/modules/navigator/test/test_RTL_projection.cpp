@@ -76,7 +76,7 @@ TEST_F(RtlProjectionTest, PrefersCurrentMissionSegment)
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 90.f, 10.f, kAlt);
 
 	// WHEN: project with mission_index=1
-	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, reason);
 
 	// THEN: projects onto segment [0-1] with cross-track approximately 10 m
 	ASSERT_TRUE(ok);
@@ -110,8 +110,8 @@ TEST_P(RtlProjectionClampTest, ClampsOutOfRangeMissionIndex)
 	const int reference_index = (bad_index < 0) ? 0 : static_cast<int>(mission.size()) - 1;
 
 	// WHEN: Projection runs with the invalid index and with the corresponding clamped reference index.
-	bool ok_bad = planner.collectVehicleProjection(vehicle, bad_index, config, ctx_bad, &reason);
-	bool ok_reference = planner.collectVehicleProjection(vehicle, reference_index, config, ctx_reference, &reason);
+	bool ok_bad = planner.collectVehicleProjection(vehicle, bad_index, config, ctx_bad, reason);
+	bool ok_reference = planner.collectVehicleProjection(vehicle, reference_index, config, ctx_reference, reason);
 
 	// THEN: The invalid index behaves exactly like the clamped mission boundary.
 	ASSERT_TRUE(ok_bad);
@@ -159,7 +159,7 @@ TEST_F(RtlProjectionTest, ReverseFlightPrefersReverseCurrentSegment)
 	const MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 10.f, kAlt);
 
 	// WHEN: collectVehicleProjection is called at the segment boundary.
-	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, reason);
 
 	// THEN: The reverse-owned segment [1-2] is selected.
 	ASSERT_TRUE(ok);
@@ -193,7 +193,7 @@ TEST_F(RtlProjectionTest, PrefersStoredLoopAnchor)
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 75.f, 10.f, kAlt);
 
 	// WHEN: project with mission_index=0 (inside the loop)
-	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, reason);
 
 	// THEN: projection segment is the loop segment [2->0]
 	ASSERT_TRUE(ok);
@@ -245,7 +245,7 @@ TEST_P(RtlProjectionDatasetTest, SelectsExpectedSegment)
 	const MissionRoutePlanner::Position vehicle = makePositionAbsolute(scenario.lat, scenario.lon, scenario.alt);
 
 	// WHEN: collectVehicleProjection is called for the scenario mission index.
-	bool ok = planner.collectVehicleProjection(vehicle, scenario.mission_index, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, scenario.mission_index, config, ctx, reason);
 
 	// THEN: The expected route segment is selected.
 	ASSERT_TRUE(ok);
@@ -288,7 +288,7 @@ TEST_F(RtlProjectionTest, TakeoffIsLocalMinimum)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -321,7 +321,7 @@ TEST_F(RtlProjectionTest, StackedWaypointAboveTakeoff)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 0, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -352,7 +352,7 @@ TEST_F(RtlProjectionTest, StackedWaypointAboveLand)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 2, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 2, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -384,7 +384,7 @@ TEST_F(RtlProjectionTest, StraightLineIgnoresNonMinCorners)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -423,7 +423,7 @@ TEST_F(RtlProjectionTest, RectangleKeepsThreeClosestSegments)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 3, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 3, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -462,7 +462,7 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 9, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 9, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 
@@ -502,7 +502,7 @@ TEST_P(RtlProjectionInvalidVehiclePositionTest, RejectsInvalidVehiclePosition)
 	vehicle.lat = lat;
 	vehicle.lon = lon;
 	vehicle.alt = kAlt;
-	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 1, config, ctx, reason);
 
 	// THEN: Projection fails before any segment selection occurs.
 	EXPECT_FALSE(ok);
@@ -543,7 +543,7 @@ TEST_F(RtlProjectionTest, SingleWaypointMissionFails)
 	MissionRoutePlanner::Position vehicle = makePositionAbsolute(kBaseLat, kBaseLon, kAlt);
 
 	// WHEN: attempt projection
-	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 0, config, ctx, reason);
 
 	// THEN: projection fails (no segments)
 	EXPECT_FALSE(ok);
@@ -575,7 +575,7 @@ TEST_F(RtlProjectionTest, ZigzagMissionStressesCandidateBuffer)
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
 	// WHEN: project vehicle and select safe point
-	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, &reason);
+	bool ok = planner.collectVehicleProjection(vehicle, 5, config, proj_ctx, reason);
 	ASSERT_TRUE(ok);
 	MissionRoutePlanner::Selection selection = planner.selectSafePoint(proj_ctx, config);
 

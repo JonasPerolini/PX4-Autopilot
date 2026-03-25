@@ -124,10 +124,11 @@ private:
 	void resetRouteSafePointCache();
 
 	/**
-	 * @brief function to call regularly to do background work
+	 * @brief Refresh the mission and safe-point caches used by route-safe-point RTL.
 	 */
 	void updateDatamanCache();
 
+	/** @brief Select the active RTL executor, destination, and cached plan. */
 	void setRtlTypeAndDestination();
 
 	/**
@@ -141,6 +142,7 @@ private:
 	 *
 	 */
 	void findRtlDestination(DestinationType &destination_type, PositionYawSetpoint &destination, uint8_t &safe_point_index);
+	/** @brief Resolve the RTL destination for a specific RTL_TYPE policy. */
 	void findRtlDestinationForType(int rtl_type, DestinationType &destination_type,
 				       PositionYawSetpoint &destination, uint8_t &safe_point_index);
 
@@ -174,8 +176,9 @@ private:
 	float computeReturnAltitude(const PositionYawSetpoint &rtl_position, DestinationType destination_type, float cone_half_angle_deg) const;
 
 	/**
-	 * @brief initialize RTL mission type
+	 * @brief Construct and initialize the selected mission-based RTL executor.
 	 *
+	 * @return true if the executor was created and initialized successfully
 	 */
 	bool initRtlMissionType(RtlType new_rtl_type, float rtl_alt);
 
@@ -218,8 +221,8 @@ private:
 	RtlBase *_rtl_mission_type_handle{nullptr};
 	RtlType _rtl_type{RtlType::RTL_DIRECT};
 
-	bool _home_has_land_approach;			///< Flag if the home position has a land approach defined
-	bool _one_rally_point_has_land_approach;	///< Flag if a rally point has a land approach defined
+	bool _home_has_land_approach;           ///< Flag if the home position has a land approach defined
+	bool _any_safe_point_has_land_approach; ///< Flag if a rally point has a land approach defined
 
 	uint32_t _route_plan_mission_id{0};
 	uint32_t _route_plan_safe_points_id{0};
