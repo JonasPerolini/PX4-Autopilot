@@ -164,28 +164,29 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 	const auto *local_position = _navigator->get_local_position();
 
 	MissionRoutePlanner::Config config{};
-	config.vehicle_projection_search_dist = (vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING)
-						? _param_mis_mc_seg_dist.get() : _param_mis_fw_seg_dist.get();
-	config.acceptance_radius = _navigator->get_acceptance_radius();
-	config.home_altitude_amsl = _navigator->home_global_position_valid()
-				    ? _navigator->get_home_position()->alt : global_position->alt;
-	config.is_multicopter = (vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING)
-				&& (vehicle_status.in_transition_mode == false);
-	config.vehicle_velocity_valid = (local_position != nullptr)
-					&& PX4_ISFINITE(local_position->vx)
-					&& PX4_ISFINITE(local_position->vy);
-	config.vehicle_velocity_north = (local_position != nullptr) ? local_position->vx : NAN;
-	config.vehicle_velocity_east = (local_position != nullptr) ? local_position->vy : NAN;
-	config.vehicle_is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
-	config.vehicle_in_transition_to_fw = vehicle_status.in_transition_to_fw;
-	config.last_flown_loop_segment = _last_flown_loop_segment;
+	config.parameters.vehicle_projection_search_dist = (vehicle_status.vehicle_type
+			== vehicle_status_s::VEHICLE_TYPE_ROTARY_WING)
+			? _param_mis_mc_seg_dist.get() : _param_mis_fw_seg_dist.get();
+	config.parameters.acceptance_radius = _navigator->get_acceptance_radius();
+	config.parameters.home_altitude_amsl = _navigator->home_global_position_valid()
+					       ? _navigator->get_home_position()->alt : global_position->alt;
+	config.state.is_multicopter = (vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING)
+				      && (vehicle_status.in_transition_mode == false);
+	config.state.velocity_valid = (local_position != nullptr)
+				      && PX4_ISFINITE(local_position->vx)
+				      && PX4_ISFINITE(local_position->vy);
+	config.state.velocity_ne(0) = (local_position != nullptr) ? local_position->vx : NAN;
+	config.state.velocity_ne(1) = (local_position != nullptr) ? local_position->vy : NAN;
+	config.state.is_fixed_wing = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING;
+	config.state.in_transition_to_fw = vehicle_status.in_transition_to_fw;
+	config.execution.last_flown_loop_segment = _last_flown_loop_segment;
 
 	MissionRoutePlanner::ProjectionContext projection_context{};
 	MissionRoutePlanner::FailureReason failure_reason{MissionRoutePlanner::FailureReason::Unknown};
 	MissionRoutePlanner::Position vehicle_position{global_position->lat, global_position->lon, global_position->alt};
 
-	if (planner.collectVehicleProjection(vehicle_position, _mission.current_seq, config, projection_context,
-					     failure_reason) == false) {
+	if (planner.collectVehicleProjection(vehicle_position, _mission.current_seq,
+					     config, projection_context, failure_reason) == false) {
 		PX4_ERR("Mission route rejoin unavailable: %s", MissionRoutePlanner::failureReasonString(failure_reason));
 		return false;
 	}
@@ -197,7 +198,8 @@ bool Mission::trySetRouteJoinOnActivation(bool resume_mission_on_previous)
 	}
 
 	const MissionRoutePlanner::Path path = planner.findNominalPathToGoal(route_end_index,
-					       projection_context.dist_along_to_route_end, projection_context, config);
+					       projection_context.dist_along_to_route_end,
+					       projection_context, config);
 
 	if (!path.valid() || path.first_item_index < 0 || path.first_item_index >= _mission.count) {
 		PX4_ERR("Mission route rejoin failed to find a valid nominal path");

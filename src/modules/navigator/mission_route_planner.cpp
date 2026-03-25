@@ -222,18 +222,18 @@ bool MissionRoutePlanner::findAttachedValidPositionIndex(uint16_t start_index, f
 	return false;
 }
 
-void MissionRoutePlanner::loadSafePointBatch(float home_altitude_amsl, const Config &config, SafePointBatch &batch) const
+void MissionRoutePlanner::loadSafePointBatch(const Config &config, SafePointBatch &batch) const
 {
 	batch = {};
 
 	const int safe_point_count = min(_provider.safePointCount(), static_cast<int>(MAX_SAFE_POINT_BATCH));
-	constexpr int usable_safe_point_bits = sizeof(config.usable_safe_point_bitmask) * 8;
+	constexpr int usable_safe_point_bits = sizeof(config.execution.usable_safe_point_bitmask) * 8;
 
 	for (int safe_point_index = 0; safe_point_index < safe_point_count; ++safe_point_index) {
 		const uint64_t safe_point_bit = 1ULL << safe_point_index;
 
 		if (safe_point_index >= usable_safe_point_bits
-		    || !(config.usable_safe_point_bitmask & safe_point_bit)) {
+		    || !(config.execution.usable_safe_point_bitmask & safe_point_bit)) {
 			PX4_DEBUG("RTL safe point %d skipped by runtime filter", safe_point_index);
 			continue;
 		}
@@ -247,7 +247,8 @@ void MissionRoutePlanner::loadSafePointBatch(float home_altitude_amsl, const Con
 
 		Position safe_point_position{};
 
-		if (!extractSafePointPosition(safe_point_item, home_altitude_amsl, safe_point_position)) {
+		if (!extractSafePointPosition(safe_point_item, config.parameters.home_altitude_amsl,
+					      safe_point_position)) {
 			PX4_DEBUG("RTL safe point %d skipped, invalid position or frame", safe_point_index);
 			continue;
 		}
@@ -782,7 +783,8 @@ bool MissionRoutePlanner::clampMissionIndex(int32_t &mission_index) const
 }
 
 bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_position, int32_t mission_index,
-		const Config &config, ProjectionContext &projection_context, FailureReason &failure_reason) const
+		const Config &config, ProjectionContext &projection_context,
+		FailureReason &failure_reason) const
 {
 	failure_reason = FailureReason::Unknown;
 
@@ -809,9 +811,9 @@ bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_posit
 	ProjectionBatchOutputs batch_outputs{};
 	FailureReason batch_failure_reason{FailureReason::Unknown};
 
-	if (!findProjectionCandidatesBatch(mission_index, config.home_altitude_amsl,
-					   config.is_flying_reverse, config.vehicle_projection_search_dist,
-					   config.last_flown_loop_segment, s_safe_point_batch,
+	if (!findProjectionCandidatesBatch(mission_index, config.parameters.home_altitude_amsl,
+					   config.state.is_flying_reverse, config.parameters.vehicle_projection_search_dist,
+					   config.execution.last_flown_loop_segment, s_safe_point_batch,
 					   batch_outputs, batch_failure_reason)) {
 		failure_reason = batch_failure_reason;
 		return false;
@@ -854,18 +856,19 @@ bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_posit
 
 		bool is_priority_match = false;
 
-		if (config.last_flown_loop_segment.validLoop()) {
+		if (config.execution.last_flown_loop_segment.validLoop()) {
 			// When the vehicle was last known to be on a loop segment, prefer that exact segment over a nearby
 			// nominal segment candidate to avoid "forgetting" the active loop context across replans.
-			is_priority_match = config.last_flown_loop_segment.start.idx == candidate.segment.start.idx
-					    && config.last_flown_loop_segment.end.idx == candidate.segment.end.idx;
+			is_priority_match = config.execution.last_flown_loop_segment.start.idx == candidate.segment.start.idx
+					    && config.execution.last_flown_loop_segment.end.idx == candidate.segment.end.idx;
 
 			if (is_priority_match) {
 				PX4_DEBUG("RTL UAV proj prioritizing cand %u (loop segment match)", static_cast<unsigned>(i));
 			}
 
 		} else {
-			is_priority_match = isIndexInProjectionSegment(candidate.segment, mission_index, config.is_flying_reverse);
+			is_priority_match = isIndexInProjectionSegment(candidate.segment, mission_index,
+					    config.state.is_flying_reverse);
 
 			if (is_priority_match) {
 				PX4_DEBUG("RTL UAV proj prioritizing cand %u (segment match)", static_cast<unsigned>(i));
@@ -895,10 +898,9 @@ bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_posit
 	projection_context.vehicle_pos = vehicle_position;
 	projection_context.mission_index = mission_index;
 	projection_context.seg_candidate = candidate_buffer.candidates[best_candidate_index];
-	projection_context.is_flying_reverse = config.is_flying_reverse;
-	projection_context.vehicle_velocity_north = config.vehicle_velocity_north;
-	projection_context.vehicle_velocity_east = config.vehicle_velocity_east;
-	projection_context.vehicle_velocity_valid = config.vehicle_velocity_valid;
+	projection_context.is_flying_reverse = config.state.is_flying_reverse;
+	projection_context.vehicle_vel_ne = config.state.velocity_ne;
+	projection_context.velocity_valid = config.state.velocity_valid;
 	projection_context.dist_along_to_route_end = batch_outputs.dist_along_to_route_end;
 	projection_context.mission_loops_remaining = batch_outputs.loops_remaining;
 
@@ -910,7 +912,8 @@ bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_posit
 		  static_cast<double>(min_path_distance));
 
 	if (projection_context.seg_candidate.segment.validLoop()) {
-		projection_context.loop_ctx = buildLoopContext(projection_context.seg_candidate, config.home_altitude_amsl);
+		projection_context.loop_ctx = buildLoopContext(projection_context.seg_candidate,
+					      config.parameters.home_altitude_amsl);
 	}
 
 	failure_reason = FailureReason::None;
@@ -1031,16 +1034,15 @@ matrix::Vector2f MissionRoutePlanner::computeDesiredCourseVector(const Projectio
 	return desired_course_vec;
 }
 
-bool MissionRoutePlanner::uTurnRequired(const ProjectionContext &projection_context, const Config &config,
+bool MissionRoutePlanner::uTurnRequired(const ProjectionContext &projection_context,
+					const Config &config,
 					bool will_fly_reverse) const
 {
-	if (!(config.vehicle_is_fixed_wing || config.vehicle_in_transition_to_fw)) {
+	if (!(config.state.is_fixed_wing || config.state.in_transition_to_fw)) {
 		return false;
 	}
 
-	const matrix::Vector2f local_velocity{projection_context.vehicle_velocity_north, projection_context.vehicle_velocity_east};
-
-	if (!projection_context.vehicle_velocity_valid || !local_velocity.isAllFinite()) {
+	if (!projection_context.velocity_valid || !projection_context.vehicle_vel_ne.isAllFinite()) {
 		return false;
 	}
 
@@ -1050,16 +1052,17 @@ bool MissionRoutePlanner::uTurnRequired(const ProjectionContext &projection_cont
 		return false;
 	}
 
-	if (local_velocity.norm_squared() <= FLT_EPSILON || desired_course.norm_squared() <= FLT_EPSILON) {
+	if (projection_context.vehicle_vel_ne.norm_squared() <= FLT_EPSILON || desired_course.norm_squared() <= FLT_EPSILON) {
 		return false;
 	}
 
-	return local_velocity.dot(desired_course) < 0.f;
+	return projection_context.vehicle_vel_ne.dot(desired_course) < 0.f;
 }
 
 MissionRoutePlanner::Path MissionRoutePlanner::findShortestPathAlongRoute(uint16_t goal_segment_end_idx,
 		float goal_dist_along,
-		const ProjectionContext &projection_context, const Config &config,
+		const ProjectionContext &projection_context,
+		const Config &config,
 		PathDirectionMode direction_mode) const
 {
 	Path path{};
@@ -1067,7 +1070,7 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPathAlongRoute(uint16
 	const bool goal_is_on_jump_segment = (goal_segment_end_idx == projection_context.loop_ctx.segment.end.idx);
 	const bool on_jump_segment_and_goal_elsewhere = projection_context.loop_ctx.valid() && !goal_is_on_jump_segment;
 
-	const float u_turn_penalty = config.u_turn_penalty_m;
+	const float u_turn_penalty = config.parameters.u_turn_penalty_m;
 	const auto calculate_cost = [u_turn_penalty](float raw_distance, bool u_turn_required) {
 		return raw_distance + (u_turn_required ? u_turn_penalty : 0.f);
 	};
@@ -1164,7 +1167,8 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPathAlongRoute(uint16
 
 	const float dist_to_first_item = get_distance_to_next_waypoint(first_item_location.lat, first_item_location.lon,
 					 projection_context.vehicle_pos.lat, projection_context.vehicle_pos.lon);
-	path.in_first_item_acc_rad = PX4_ISFINITE(dist_to_first_item) && dist_to_first_item < config.acceptance_radius;
+	path.in_first_item_acc_rad = PX4_ISFINITE(dist_to_first_item)
+				     && dist_to_first_item < config.parameters.acceptance_radius;
 
 	if (on_jump_segment_and_goal_elsewhere) {
 		PX4_DEBUG("RTL path on loop jump [A,B], loop_along[%.1f, %.1f], loops remaining: %u",
@@ -1189,7 +1193,8 @@ MissionRoutePlanner::Path MissionRoutePlanner::findShortestPathAlongRoute(uint16
 }
 
 MissionRoutePlanner::Path MissionRoutePlanner::findNominalPathToGoal(uint16_t goal_segment_end_idx,
-		float goal_dist_along, const ProjectionContext &projection_context, const Config &config) const
+		float goal_dist_along, const ProjectionContext &projection_context,
+		const Config &config) const
 {
 	return findShortestPathAlongRoute(goal_segment_end_idx, goal_dist_along, projection_context, config,
 					  PathDirectionMode::ForceNominal);
@@ -1219,14 +1224,14 @@ MissionRoutePlanner::JoinContext MissionRoutePlanner::buildJoinContext(const Pro
 bool MissionRoutePlanner::directToSafePoint(const Position &safe_point_position, const Position &vehicle_position,
 		const Config &config) const
 {
-	if (!config.is_multicopter) {
+	if (!config.state.is_multicopter) {
 		return false;
 	}
 
 	const float dist = get_distance_to_next_waypoint(vehicle_position.lat, vehicle_position.lon,
 			   safe_point_position.lat, safe_point_position.lon);
 
-	return PX4_ISFINITE(dist) && dist < config.direct_acceptance_radius;
+	return PX4_ISFINITE(dist) && dist < config.parameters.direct_acceptance_radius;
 }
 
 MissionRoutePlanner::Selection MissionRoutePlanner::selectSafePoint(const ProjectionContext &projection_context,
@@ -1249,7 +1254,7 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectSafePoint(const Projec
 	}
 
 	s_safe_point_batch = {};
-	loadSafePointBatch(config.home_altitude_amsl, config, s_safe_point_batch);
+	loadSafePointBatch(config, s_safe_point_batch);
 
 	if (s_safe_point_batch.count == 0) {
 		return selection;
@@ -1258,8 +1263,8 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectSafePoint(const Projec
 	FailureReason failure_reason = FailureReason::Unknown;
 	ProjectionBatchOutputs batch_outputs{};
 
-	if (!findProjectionCandidatesBatch(INT32_MAX, config.home_altitude_amsl, false,
-					   config.safe_point_projection_search_dist, Segment{},
+	if (!findProjectionCandidatesBatch(INT32_MAX, config.parameters.home_altitude_amsl, false,
+					   config.parameters.safe_point_projection_search_dist, Segment{},
 					   s_safe_point_batch, batch_outputs, failure_reason)) {
 		PX4_DEBUG("RTL safe point batch scan failed: %s", failureReasonString(failure_reason));
 		return selection;
@@ -1319,7 +1324,8 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectSafePoint(const Projec
 			continue;
 		}
 
-		const bool direct_to_safe_point = directToSafePoint(safe_point_position, projection_context.vehicle_pos, config);
+		const bool direct_to_safe_point = directToSafePoint(safe_point_position, projection_context.vehicle_pos,
+						  config);
 
 		if (!selection.found || direct_to_safe_point || best_path.dist < selection.path.dist) {
 			selection.found = true;
@@ -1377,18 +1383,20 @@ MissionRoutePlanner::Selection MissionRoutePlanner::selectMissionEndpointFallbac
 	Path path_to_takeoff{};
 	Position takeoff_position{};
 	const bool path_to_takeoff_valid = have_takeoff
-					   && extractMissionPosition(takeoff_item, config.home_altitude_amsl, takeoff_position)
+					   && extractMissionPosition(takeoff_item, config.parameters.home_altitude_amsl,
+							   takeoff_position)
 					   && (path_to_takeoff = findReversePathToGoal(takeoff_index, 0.f,
 							   projection_context, config)).valid();
 
-	if (path_to_takeoff_valid && PX4_ISFINITE(config.home_altitude_amsl)) {
-		takeoff_position.alt = config.home_altitude_amsl;
+	if (path_to_takeoff_valid && PX4_ISFINITE(config.parameters.home_altitude_amsl)) {
+		takeoff_position.alt = config.parameters.home_altitude_amsl;
 	}
 
 	Path path_to_land{};
 	Position land_position{};
 	const bool path_to_land_valid = have_land
-					&& extractMissionPosition(land_item, config.home_altitude_amsl, land_position)
+					&& extractMissionPosition(land_item, config.parameters.home_altitude_amsl,
+							land_position)
 					&& (path_to_land = findNominalPathToGoal(land_index,
 							projection_context.dist_along_to_route_end,
 							projection_context, config)).valid();
@@ -1469,8 +1477,8 @@ bool MissionRoutePlanner::planRouteToGoal(const Position &vehicle_position, int3
 {
 	plan = {};
 
-	if (!collectVehicleProjection(vehicle_position, mission_index, config, plan.projection_context,
-				      failure_reason)) {
+	if (!collectVehicleProjection(vehicle_position, mission_index, config,
+				      plan.projection_context, failure_reason)) {
 		return false;
 	}
 

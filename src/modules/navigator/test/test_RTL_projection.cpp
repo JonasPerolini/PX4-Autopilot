@@ -154,7 +154,7 @@ TEST_F(RtlProjectionTest, ReverseFlightPrefersReverseCurrentSegment)
 	};
 	VectorProvider provider(mission, {});
 	MissionRoutePlanner planner(provider);
-	config.is_flying_reverse = true;
+	config.state.is_flying_reverse = true;
 
 	const MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 10.f, kAlt);
 
@@ -183,12 +183,12 @@ TEST_F(RtlProjectionTest, PrefersStoredLoopAnchor)
 	MissionRoutePlanner planner(provider);
 
 	// Set the stored loop anchor to segment [2->0]
-	config.last_flown_loop_segment.start.idx = 2;
-	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.end.idx = 0;
-	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.is_loop = true;
-	config.last_flown_loop_segment.loops_remaining = 1;
+	config.execution.last_flown_loop_segment.start.idx = 2;
+	config.execution.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.end.idx = 0;
+	config.execution.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.is_loop = true;
+	config.execution.last_flown_loop_segment.loops_remaining = 1;
 
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 75.f, 10.f, kAlt);
 
@@ -417,8 +417,8 @@ TEST_F(RtlProjectionTest, RectangleKeepsThreeClosestSegments)
 	VectorProvider provider(mission, safe_points);
 	MissionRoutePlanner planner(provider);
 
-	config.vehicle_projection_search_dist = 2000.f;
-	config.safe_point_projection_search_dist = 2000.f;
+	config.parameters.vehicle_projection_search_dist = 2000.f;
+	config.parameters.safe_point_projection_search_dist = 2000.f;
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 500.f, 0.f, kAlt);
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
@@ -456,8 +456,8 @@ TEST_F(RtlProjectionTest, DuplicateCornerWaypointsDoNotEvictValidCandidates)
 	VectorProvider provider(mission, safe_points);
 	MissionRoutePlanner planner(provider);
 
-	config.vehicle_projection_search_dist = 500.f;
-	config.safe_point_projection_search_dist = 500.f;
+	config.parameters.vehicle_projection_search_dist = 500.f;
+	config.parameters.safe_point_projection_search_dist = 500.f;
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 300.f, 200.f, kAlt);
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 
@@ -569,8 +569,8 @@ TEST_F(RtlProjectionTest, ZigzagMissionStressesCandidateBuffer)
 	VectorProvider provider(mission, safe_points);
 	MissionRoutePlanner planner(provider);
 
-	config.vehicle_projection_search_dist = 500.f;
-	config.safe_point_projection_search_dist = 500.f;
+	config.parameters.vehicle_projection_search_dist = 500.f;
+	config.parameters.safe_point_projection_search_dist = 500.f;
 	MissionRoutePlanner::Position vehicle = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 600.f, kAlt);
 	MissionRoutePlanner::ProjectionContext proj_ctx{};
 

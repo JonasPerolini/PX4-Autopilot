@@ -66,6 +66,7 @@
 #include <uORB/topics/telemetry_status.h>
 
 class Navigator;
+class MissionRouteCache;
 
 class RTL : public NavigatorMode, public ModuleParams
 {
@@ -127,6 +128,46 @@ private:
 	 * @brief Refresh the mission and safe-point caches used by route-safe-point RTL.
 	 */
 	void updateDatamanCache();
+
+	/** @brief Return true when route-safe-point RTL has all mission and cache prerequisites satisfied. */
+	bool canUseRouteSafePointRtl(const MissionRouteCache *mission_route_cache) const;
+
+	/** @brief Filter safe points that are currently usable for route-safe-point planning. */
+	uint64_t calculateUsableSafePointBitmask(const MissionRouteCache &mission_route_cache, float home_altitude_amsl);
+
+	/** @brief Build the route-safe-point planner input for the current vehicle and mission state. */
+	MissionRoutePlanner::Config buildRouteSafePointConfig(bool is_flying_reverse,
+			uint64_t usable_safe_points) const;
+
+	/** @brief Reuse an active straight-to-safe-point branch-off if the vehicle is still close enough to it. */
+	bool reuseCachedRouteSafePointPlan(const MissionRoutePlanner &planner,
+					   const MissionRouteCache &mission_route_cache,
+					   const MissionRoutePlanner::Position &vehicle_position,
+					   float acceptance_radius,
+					   const MissionRoutePlanner::Plan &cached_plan,
+					   bool cached_should_go_straight_to_safe_point,
+					   MissionRoutePlanner::Plan &new_plan) const;
+
+	/** @brief Evaluate a fresh or reusable route-safe-point plan. */
+	bool evaluateRouteSafePointPlan(const MissionRouteCache &mission_route_cache,
+					const MissionRoutePlanner::Plan &cached_plan,
+					bool cached_should_go_straight_to_safe_point,
+					MissionRoutePlanner::Plan &new_plan,
+					bool &should_go_straight_to_safe_point);
+
+	/** @brief Apply a valid route-safe-point plan to the RTL destination/output state. */
+	void applyRouteSafePointPlan(const MissionRoutePlanner::Plan &plan,
+				     bool current_route_direction_reversed,
+				     RtlType &new_rtl_type,
+				     DestinationType &destination_type,
+				     PositionYawSetpoint &destination,
+				     uint8_t &safe_point_index);
+
+	/** @brief Fall back from route-safe-point RTL to the existing direct or mission-land logic. */
+	void applyRouteSafePointFallback(RtlType &new_rtl_type,
+					 DestinationType &destination_type,
+					 PositionYawSetpoint &destination,
+					 uint8_t &safe_point_index);
 
 	/** @brief Select the active RTL executor, destination, and cached plan. */
 	void setRtlTypeAndDestination();

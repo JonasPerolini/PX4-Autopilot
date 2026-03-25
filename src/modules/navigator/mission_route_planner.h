@@ -62,7 +62,7 @@ public:
 	static constexpr uint8_t MAX_SEGMENT_CANDIDATES{3};
 	/**
 	 * Maximum safe points evaluated per planning pass.
-	 * NOTE: Config::usable_safe_point_bitmask uses one bit per safe point, so this must stay <= 64.
+	 * NOTE: ExecutionContext::usable_safe_point_bitmask uses one bit per safe point, so this must stay <= 64.
 	 * RtlStatus.msg also uses uint8_t for safe_point_index, so this must stay <= 255.
 	 */
 	static constexpr uint8_t MAX_SAFE_POINT_BATCH{64};
@@ -194,9 +194,8 @@ public:
 		int32_t mission_index{-1};
 		SegmentCandidate seg_candidate{};
 		bool is_flying_reverse{false};
-		float vehicle_velocity_north{NAN};
-		float vehicle_velocity_east{NAN};
-		bool vehicle_velocity_valid{false};
+		matrix::Vector2f vehicle_vel_ne{NAN, NAN};
+		bool velocity_valid{false};
 		float dist_along_to_route_end{0.f};
 		uint8_t mission_loops_remaining{0};
 		LoopContext loop_ctx{};
@@ -279,22 +278,33 @@ public:
 		bool valid() const { return projection_context.valid() && join_context.valid() && selection.valid(); }
 	};
 
-	struct Config {
+	struct PlannerParameters {
 		float vehicle_projection_search_dist{0.f};
 		float safe_point_projection_search_dist{0.f};
 		float acceptance_radius{0.f};
 		float direct_acceptance_radius{0.f};
 		float home_altitude_amsl{NAN};
+		float u_turn_penalty_m{4000.f};
+	};
+
+	struct VehicleStateContext {
 		bool is_multicopter{false};
 		bool is_flying_reverse{false};
-		float vehicle_velocity_north{NAN};
-		float vehicle_velocity_east{NAN};
-		bool vehicle_velocity_valid{false};
-		bool vehicle_is_fixed_wing{false};
-		bool vehicle_in_transition_to_fw{false};
-		float u_turn_penalty_m{4000.f};
+		matrix::Vector2f velocity_ne{NAN, NAN};
+		bool velocity_valid{false};
+		bool is_fixed_wing{false};
+		bool in_transition_to_fw{false};
+	};
+
+	struct ExecutionContext {
 		Segment last_flown_loop_segment{}; /**< Optional cached DO_JUMP edge anchor; invalid when no active loop is being preserved. */
 		uint64_t usable_safe_point_bitmask{~0ULL};
+	};
+
+	struct Config {
+		PlannerParameters parameters{};
+		VehicleStateContext state{};
+		ExecutionContext execution{};
 	};
 
 	enum class FailureReason : uint8_t {
@@ -447,7 +457,7 @@ private:
 	bool findAttachedValidPositionIndex(uint16_t start_index, float home_altitude_amsl,
 					    uint16_t &attached_position_index) const;
 	/** @brief Load the valid safe points that fit in the single planner pass. */
-	void loadSafePointBatch(float home_altitude_amsl, const Config &config, SafePointBatch &batch) const;
+	void loadSafePointBatch(const Config &config, SafePointBatch &batch) const;
 	/** @brief Clear all per-safe-point candidate buffers before running a new batch scan. */
 	void resetSafePointBatchResults(SafePointBatch &batch) const;
 	/** @brief Advance mission scanning state to the next position-bearing segment end. */

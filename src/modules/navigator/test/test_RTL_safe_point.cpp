@@ -226,7 +226,7 @@ TEST_F(RtlSafePointTest, RelativeAltitudeSafePointUsesHomeAltitude)
 
 	VectorProvider provider{mission, safe_points};
 	MissionRoutePlanner planner{provider};
-	config.home_altitude_amsl = 620.f;
+	config.parameters.home_altitude_amsl = 620.f;
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
@@ -260,7 +260,7 @@ TEST_F(RtlSafePointTest, RelativeAltitudeSafePointRequiresFiniteHomeAltitude)
 
 	VectorProvider provider{mission, safe_points};
 	MissionRoutePlanner planner{provider};
-	config.home_altitude_amsl = NAN;
+	config.parameters.home_altitude_amsl = NAN;
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
 
@@ -285,9 +285,9 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestBehindReverse_MC)
 	// GIVEN: Default 16-item mission with 7 rally points, MC config.
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
@@ -310,9 +310,9 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestForwardAhead_MC)
 	// GIVEN: Default mission, MC config, vehicle flying with velocity (15,-15).
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = -15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = -15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10795279737903, 2.299475977516394, 454.4f);
@@ -334,9 +334,9 @@ TEST_F(RtlSafePointTest, DefaultMission_WithinAcceptanceRadius)
 	// GIVEN: Default mission, MC config. Vehicle near rally 4.
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.09681253236241, 2.2993209050608376, 838.48f);
@@ -359,9 +359,9 @@ TEST_F(RtlSafePointTest, DefaultMission_AllBehind_MC)
 	// GIVEN: Default mission, MC config. Vehicle near mission_index=15 (end of route).
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.112843317707494, 2.3059421291432525, 455.4f);
@@ -387,9 +387,9 @@ TEST_F(RtlSafePointTest, DefaultMission_InvalidRallyPointSkipped)
 
 	VectorProvider provider{default_dataset::mission(), safe_points};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = -15.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = -15.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.11057010025454, 2.2972410253925846, 461.4f);
@@ -417,9 +417,9 @@ TEST_F(RtlSafePointTest, DefaultMission_ClosestBehindReverse_FW)
 	VectorProvider provider{default_dataset::mission(), default_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10508903154495, 2.302372024012729, 463.0f);
@@ -442,9 +442,9 @@ TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 0.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 0.f;
 
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
@@ -460,18 +460,18 @@ TEST_F(RtlSafePointTest, FWUturnPenaltySelectsForwardOverCloserReverse)
 }
 
 // WHY: A VTOL already transitioning to fixed-wing must use the same u-turn penalty logic as FW.
-// WHAT: vehicle_in_transition_to_fw selects the forward rally just like a fixed-wing vehicle.
+// WHAT: in_transition_to_fw selects the forward rally just like a fixed-wing vehicle.
 TEST_F(RtlSafePointTest, TransitionToFwUsesFixedWingUturnPenalty)
 {
 	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = defaultConfig();
-	config.is_multicopter = false;
-	config.vehicle_in_transition_to_fw = true;
-	config.u_turn_penalty_m = 4000.f;
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 0.f;
+	config.state.is_multicopter = false;
+	config.state.in_transition_to_fw = true;
+	config.parameters.u_turn_penalty_m = 4000.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 0.f;
 
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
@@ -494,9 +494,9 @@ TEST_F(RtlSafePointTest, MCNoUturnPenaltySelectsClosestReverse)
 {
 	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 15.f;
-	config.vehicle_velocity_east = 0.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 15.f;
+	config.state.velocity_ne(1) = 0.f;
 
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
@@ -522,9 +522,9 @@ TEST_F(RtlSafePointTest, CornerMission_RallyOnCorner_MC)
 	// GIVEN: Corner 16-item mission with 8 rally points, MC config.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = -corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = -corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = -corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.103348739288705, 2.3235968076446945, 600.f);
@@ -548,9 +548,9 @@ TEST_F(RtlSafePointTest, CornerMission_CornerProjectionHandled_FW)
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = -corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = -corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = -corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.103348739288705, 2.3235968076446945, 600.f);
@@ -579,9 +579,9 @@ TEST_F(RtlSafePointTest, CornerMission_BackNoTransition_MC)
 	// GIVEN: Corner mission, MC config. Vehicle at index 7 near a transition boundary.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = -corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.102107841234414, 2.31680521490218, 650.f);
@@ -603,9 +603,9 @@ TEST_F(RtlSafePointTest, CornerMission_SmallSegmentFront_MC)
 	// GIVEN: Corner mission, MC config. Vehicle near small segments at mission_index=13.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10361319095525, 2.3183349874167636, 510.f);
@@ -627,9 +627,9 @@ TEST_F(RtlSafePointTest, CornerMission_ReverseCornerScenarioSelectsRally2OnSegme
 	// GIVEN: Corner mission, MC config. Vehicle at mission_index=5 flying reverse.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = -corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = -corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = -corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10205080248656, 2.318838207366314, 650.f);
@@ -657,9 +657,9 @@ TEST_F(RtlSafePointTest, CornerMission_LandCornerScenarioSelectsRally6OnSegment1
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = corner_dataset::kVelDiag;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10368934085859, 2.3183612137416754, 510.f);
@@ -686,9 +686,9 @@ TEST_F(RtlSafePointTest, CornerMission_LoopSegmentIsHandled)
 	// GIVEN: Corner mission with DO_JUMP at index 8, MC config. Vehicle on loop area.
 	VectorProvider provider{corner_dataset::mission(), corner_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = corner_dataset::kVelFast;
-	config.vehicle_velocity_east = 0.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelFast;
+	config.state.velocity_ne(1) = 0.f;
 
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionAbsolute(46.10264815827885, 2.321939748532329, 600.f);
@@ -800,7 +800,7 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskSkipsRejectedCandidate)
 	MissionRoutePlanner planner{provider};
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
-	config.usable_safe_point_bitmask = 1ULL << 1;
+	config.execution.usable_safe_point_bitmask = 1ULL << 1;
 
 	// WHEN: Safe-point selection runs with only safe point 1 marked as usable.
 	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
@@ -834,7 +834,7 @@ TEST_F(RtlSafePointTest, UsableSafePointBitmaskCanRejectAllSafePoints)
 	MissionRoutePlanner planner{provider};
 	const MissionRoutePlanner::Position vehicle_position =
 		makePositionFromOffset(kBaseLat, kBaseLon, 10.f, 0.f, kAlt);
-	config.usable_safe_point_bitmask = 0;
+	config.execution.usable_safe_point_bitmask = 0;
 
 	// WHEN: Safe-point selection runs with no usable safe-point bits enabled.
 	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_position, 1, config, ctx, reason));
@@ -949,13 +949,13 @@ TEST_F(RtlSafePointTest, HandlesLoopWithRemainingIterations)
 // ============================================================================
 
 // WHY: Without velocity info, FW cannot determine heading and should not apply a u-turn penalty.
-// WHAT: FW with vehicle_velocity_valid=false picks the closest safe point regardless of direction.
+// WHAT: FW with velocity_valid=false picks the closest safe point regardless of direction.
 TEST_F(RtlSafePointTest, FWWithZeroVelocityPicksShortestPath)
 {
 	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = false;
+	config.state.velocity_valid = false;
 
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
@@ -976,9 +976,9 @@ TEST_F(RtlSafePointTest, FWWithOrthogonalVelocityNoUturn)
 	VectorProvider provider{uturn_penalty_dataset::mission(), uturn_penalty_dataset::safePoints()};
 	MissionRoutePlanner planner{provider};
 	config = fwConfig();
-	config.vehicle_velocity_valid = true;
-	config.vehicle_velocity_north = 0.f;
-	config.vehicle_velocity_east = 15.f;
+	config.state.velocity_valid = true;
+	config.state.velocity_ne(0) = 0.f;
+	config.state.velocity_ne(1) = 15.f;
 
 	const MissionRoutePlanner::Position vehicle_position = uturn_penalty_dataset::vehiclePosition();
 
@@ -1010,16 +1010,16 @@ TEST_F(RtlSafePointTest, VehicleInsideDoJumpLoopGetsValidPlan)
 
 	auto vehicle_pos = makePositionAbsolute(46.10214, 2.31760, kAlt + 150.f);
 	config = defaultConfig();
-	config.vehicle_velocity_north = corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = -corner_dataset::kVelDiag;
-	config.vehicle_velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = -corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
 
-	config.last_flown_loop_segment.start.idx = 7;
-	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.end.idx = 2;
-	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.is_loop = true;
-	config.last_flown_loop_segment.loops_remaining = 5;
+	config.execution.last_flown_loop_segment.start.idx = 7;
+	config.execution.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.end.idx = 2;
+	config.execution.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.is_loop = true;
+	config.execution.last_flown_loop_segment.loops_remaining = 5;
 
 	MissionRoutePlanner::Plan plan{};
 
@@ -1049,16 +1049,16 @@ TEST_F(RtlSafePointTest, LoopScenarioSelectsRally3OnSegment7To9)
 
 	auto vehicle_pos = makePositionAbsolute(46.10225, 2.31670, kAlt + 150.f);
 	config = defaultConfig();
-	config.vehicle_velocity_north = corner_dataset::kVelDiag;
-	config.vehicle_velocity_east = corner_dataset::kVelDiag;
-	config.vehicle_velocity_valid = true;
+	config.state.velocity_ne(0) = corner_dataset::kVelDiag;
+	config.state.velocity_ne(1) = corner_dataset::kVelDiag;
+	config.state.velocity_valid = true;
 
-	config.last_flown_loop_segment.start.idx = 7;
-	config.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.end.idx = 2;
-	config.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
-	config.last_flown_loop_segment.is_loop = true;
-	config.last_flown_loop_segment.loops_remaining = 3;
+	config.execution.last_flown_loop_segment.start.idx = 7;
+	config.execution.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.end.idx = 2;
+	config.execution.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.is_loop = true;
+	config.execution.last_flown_loop_segment.loops_remaining = 3;
 
 	MissionRoutePlanner::Plan plan{};
 
@@ -1104,9 +1104,9 @@ TEST_F(RtlSafePointTest, ExhaustedDoJumpTreatedAsStraightThrough)
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 0.f, kAlt + 15.f);
 	config = defaultConfig();
-	config.vehicle_velocity_north = 10.f;
-	config.vehicle_velocity_east = 0.f;
-	config.vehicle_velocity_valid = true;
+	config.state.velocity_ne(0) = 10.f;
+	config.state.velocity_ne(1) = 0.f;
+	config.state.velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
 
@@ -1147,9 +1147,9 @@ TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
 
 	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 50.f, 0.f, kAlt + 10.f);
 	config = defaultConfig();
-	config.vehicle_velocity_north = 10.f;
-	config.vehicle_velocity_east = 0.f;
-	config.vehicle_velocity_valid = true;
+	config.state.velocity_ne(0) = 10.f;
+	config.state.velocity_ne(1) = 0.f;
+	config.state.velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
 
@@ -1161,7 +1161,7 @@ TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
 	ASSERT_TRUE(plan.selection.safe_point_found);
 	ASSERT_TRUE(plan.selection.branch_off_projection.valid());
 	EXPECT_TRUE(planner.closeToBranchOffSegment(plan.selection.branch_off_projection,
-			plan.selection, config.acceptance_radius));
+			plan.selection, config.parameters.acceptance_radius));
 }
 
 // =============================================================================
@@ -1171,7 +1171,7 @@ TEST_F(RtlSafePointTest, CloseToBranchOffSegmentUsesBranchGeometry)
 struct DirectToSafePointCase {
 	const char *name;
 	bool is_multicopter;
-	float vehicle_velocity_north;
+	float velocity_north;
 	bool expect_direct;
 };
 
@@ -1186,11 +1186,11 @@ TEST_P(RtlSafePointDirectShortcutTest, PlansDirectShortcutOnlyForMulticopter)
 
 	auto vehicle_pos = direct_to_safe_point_dataset::vehiclePosition();
 	config = scenario.is_multicopter ? defaultConfig() : fwConfig();
-	config.is_multicopter = scenario.is_multicopter;
-	config.direct_acceptance_radius = 20.f;
-	config.vehicle_velocity_north = scenario.vehicle_velocity_north;
-	config.vehicle_velocity_east = 0.f;
-	config.vehicle_velocity_valid = true;
+	config.state.is_multicopter = scenario.is_multicopter;
+	config.parameters.direct_acceptance_radius = 20.f;
+	config.state.velocity_ne(0) = scenario.velocity_north;
+	config.state.velocity_ne(1) = 0.f;
+	config.state.velocity_valid = true;
 
 	MissionRoutePlanner::Plan plan{};
 	bool ok = planner.planRouteToGoal(vehicle_pos, direct_to_safe_point_dataset::kMissionIndex, config, plan, reason);
