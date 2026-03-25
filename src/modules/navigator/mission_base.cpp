@@ -500,12 +500,6 @@ void MissionBase::update_mission()
 void
 MissionBase::advance_mission()
 {
-	if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE)
-	    || (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)) {
-		advanceJoinRouteState();
-		return;
-	}
-
 	/* do not advance mission item if we're processing sub mission work items */
 	if (_work_item_type != WorkItemType::WORK_ITEM_TYPE_DEFAULT) {
 		return;
@@ -799,9 +793,26 @@ MissionBase::handleJoinRouteWorkItems(position_setpoint_triplet_s *pos_sp_triple
 				      const position_setpoint_s &current_setpoint_copy)
 {
 	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE) {
-		return handleJoinRouteWaypoint(pos_sp_triplet, current_setpoint_copy);
+		// set_mission_items() reloads the real mission item before calling setActiveMissionItems().
+		// Use the cached reached flags from the previously published join waypoint to advance the
+		// temporary join pipeline during setpoint generation, mirroring handleLanding().
+		if (!(_waypoint_position_reached && _waypoint_yaw_reached)) {
+			return handleJoinRouteWaypoint(pos_sp_triplet, current_setpoint_copy);
+		}
 
-	} else if ((_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN)) {
+		if (!joinRouteTransitionStillRequired()) {
+			PX4_INFO("Join route reached, resuming mission");
+			resetJoinRouteState();
+			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
+			return false;
+		}
+
+		PX4_INFO("Branch-in reached, starting transition");
+		_work_item_type = WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN;
+
+	}
+
+	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN) {
 		return handleTransitionAfterJoin(pos_sp_triplet);
 	}
 
@@ -960,34 +971,6 @@ MissionBase::computeFrontTransitionAlignmentYaw(int32_t current_target_index, bo
 
 	return get_bearing_to_next_waypoint(global_position->lat, global_position->lon,
 					    alignment_target.lat, alignment_target.lon);
-}
-
-void
-MissionBase::advanceJoinRouteState()
-{
-	if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_JOIN_ROUTE) {
-		if (!joinRouteTransitionStillRequired()) {
-			// The join completed with the correct VTOL state already active, so the temporary
-			// join pipeline is done. Clear the cached join context and resume normal mission work.
-			PX4_INFO("Join route reached, resuming mission");
-			resetJoinRouteState();
-			_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
-
-		} else {
-			// The virtual branch-in waypoint has been reached, but the resumed segment still
-			// expects a different VTOL state. Advance to the dedicated post-join transition
-			// work item instead of handing control back to the nominal mission target yet.
-			PX4_INFO("Branch-in reached, starting transition");
-			_work_item_type = WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN;
-		}
-
-	} else if (_work_item_type == WorkItemType::WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN) {
-		// The post-join transition completed. Drop the temporary join state so the next
-		// advance_mission() call can continue with the real mission target.
-		PX4_INFO("Join route transition complete");
-		resetJoinRouteState();
-		_work_item_type = WorkItemType::WORK_ITEM_TYPE_DEFAULT;
-	}
 }
 
 void

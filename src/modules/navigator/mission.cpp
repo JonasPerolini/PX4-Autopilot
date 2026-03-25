@@ -301,7 +301,15 @@ void Mission::setActiveMissionItems()
 	position_setpoint_triplet_s *pos_sp_triplet = _navigator->get_position_setpoint_triplet();
 	const position_setpoint_s current_setpoint_copy = pos_sp_triplet->current;
 
+
+	// The join-route pipeline uses synthetic virtual waypoints (branch-in projection and
+	// post-join transitions) that do not exist in the dataman cache.
+	// If handleJoinRouteWorkItems returns true, it has fully generated, issued, and
+	// published the virtual setpoint for this control cycle.
 	if (handleJoinRouteWorkItems(pos_sp_triplet, current_setpoint_copy)) {
+		// Early return to avoid evaluate look-aheads (e.g., getNextPositionItems)
+		// against _mission.current_seq, which is invalid while navigating
+		// to a virtual projection, and would overwrite the virtual mission item.
 		return;
 	}
 

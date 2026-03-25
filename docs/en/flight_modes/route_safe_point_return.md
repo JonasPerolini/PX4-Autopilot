@@ -282,9 +282,9 @@ The flow is:
 1. Mission mode (`trySetRouteJoinOnActivation()`) or RTL (`RtlMissionSafePointFollow::on_activation()`) computes the route target and calls `setupJoinRoute()` before `MissionBase::on_activation()`.
 2. `MissionBase::update_mission()` runs during activation. It normally clears transient `_work_item_type` state for a newly accepted mission, but it preserves `WORK_ITEM_TYPE_JOIN_ROUTE` and `WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN` so the join pipeline is not dropped before first publication.
 3. In the active loop, both Mission mode and RTL call `handleJoinRouteWorkItems()` from their `setActiveMissionItems()` implementation:
-   - `WORK_ITEM_TYPE_JOIN_ROUTE` publishes the virtual branch-in waypoint.
+   - `WORK_ITEM_TYPE_JOIN_ROUTE` publishes the virtual branch-in waypoint until the cached helper-item reached flags show that the join is complete.
    - `WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN` publishes the required VTOL front-transition or back-transition if it is still needed, otherwise it clears the join state immediately.
-4. When one of those helper items is reached or completed, `advance_mission()` gives control to `advanceJoinRouteState()` instead of advancing the real mission sequence:
+4. When one of those helper items is reached or completed, `advance_mission()` does not advance the real mission sequence because `_work_item_type != DEFAULT`. The next `set_mission_items()` pass then lets `handleJoinRouteWorkItems()` advance the temporary join pipeline during setpoint generation, matching `handleLanding()`:
    - After `JOIN_ROUTE`, it either promotes the pipeline to `TRANSITION_AFTER_JOIN` or clears the join state when the vehicle is already in the correct VTOL mode.
    - After `TRANSITION_AFTER_JOIN`, it clears the temporary join state and returns to normal mission or RTL progression.
 5. `shouldReportMissionItemReached()` suppresses `seq_reached` updates for `JOIN_ROUTE` and `TRANSITION_AFTER_JOIN`, because those helper items are synthetic and do not mean the uploaded mission item at `current_seq` was reached.

@@ -352,11 +352,6 @@ protected:
 	bool handleJoinRouteWorkItems(position_setpoint_triplet_s *pos_sp_triplet, const position_setpoint_s &current_setpoint_copy);
 
 	/**
-	 * @brief Advance the virtual join-route work item state machine.
-	 */
-	void advanceJoinRouteState();
-
-	/**
 	 * @brief Compute the front-transition yaw used when entering route-following geometry.
 	 *
 	 * By default the alignment points at the current route target. If the vehicle is
