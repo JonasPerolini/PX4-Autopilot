@@ -53,6 +53,8 @@
 #include <matrix/math.hpp>
 #include <px4_platform_common/defines.h>
 
+class MissionRoutePlannerCandidateBufferTestPeer;
+
 class MissionRoutePlanner
 {
 public:
@@ -421,6 +423,8 @@ public:
 	};
 
 private:
+	friend class MissionRoutePlannerCandidateBufferTestPeer;
+
 	struct ProjectionBatchOutputs {
 		SegmentDistanceAlong dist_along_to_last_flown_segment{};
 		float dist_along_to_route_end{0.f};

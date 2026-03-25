@@ -396,19 +396,20 @@ void MissionRoutePlanner::insertCandidateSorted(CandidateBuffer &candidate_buffe
 
 void MissionRoutePlanner::pruneProjectionCandidates(CandidateBuffer &candidate_buffer, float xtrack_limit) const
 {
-	if (candidate_buffer.count < 2) {
+	const uint8_t buffer_size = min(candidate_buffer.count, MAX_SEGMENT_CANDIDATES);
+
+	if (buffer_size == 0) {
 		return;
 	}
 
-	const uint8_t buffer_size = min(candidate_buffer.count, MAX_SEGMENT_CANDIDATES);
-	uint8_t index = buffer_size;
-
-	while (index > 0) {
-		--index;
-
+	for (uint8_t index = buffer_size - 1U; index < buffer_size; --index) {
 		if (candidate_buffer.candidates[index].dist.xtrack <= xtrack_limit) {
 			candidate_buffer.count = index + 1U;
 			return;
+		}
+
+		if (index < 1U) {
+			break;
 		}
 	}
 
