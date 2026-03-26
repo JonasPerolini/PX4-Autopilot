@@ -86,6 +86,8 @@ void RTL::updateDatamanCache()
 
 	mission_route_cache->update(mission);
 
+	// A mission larger than the route cache limit only disables the mission-geometry cache.
+	// The mission-land and safe-point caches stay live for other RTL behaviors.
 	if (_param_rtl_type.get() == RTL_TYPE_ROUTE_SAFE_POINT
 	    && mission_route_cache->missionExceedsCacheLimit(mission)) {
 		static uint32_t last_warned_mission_id = 0;
@@ -810,27 +812,21 @@ void RTL::setLandPosAsDestination(PositionYawSetpoint &rtl_position, mission_ite
 
 void RTL::setSafepointAsDestination(PositionYawSetpoint &rtl_position, const mission_item_s &mission_safe_point) const
 {
-	// There is a safe point closer than home/mission landing
-	// TODO: handle all possible mission_safe_point.frame cases
-	switch (mission_safe_point.frame) {
-	case 0: // MAV_FRAME_GLOBAL
-		rtl_position.lat = mission_safe_point.lat;
-		rtl_position.lon = mission_safe_point.lon;
-		rtl_position.alt = mission_safe_point.altitude;
-		break;
+	MissionRoutePlanner::Position safe_point_position{};
 
-	case 3: // MAV_FRAME_GLOBAL_RELATIVE_ALT
-		rtl_position.lat = mission_safe_point.lat;
-		rtl_position.lon = mission_safe_point.lon;
-		rtl_position.alt = mission_safe_point.altitude + _home_pos_sub.get().alt; // alt of safe point is rel to home
-		break;
-
-	default:
-		mavlink_log_critical(_navigator->get_mavlink_log_pub(), "RTL: unsupported MAV_FRAME\t");
-		events::send<uint8_t>(events::ID("rtl_unsupported_mav_frame"), events::Log::Error, "RTL: unsupported MAV_FRAME ({1})",
-				      mission_safe_point.frame);
-		break;
+	if (MissionRoutePlanner::extractSafePointPosition(mission_safe_point, _home_pos_sub.get().alt, safe_point_position)) {
+		rtl_position.lat = safe_point_position.lat;
+		rtl_position.lon = safe_point_position.lon;
+		rtl_position.alt = safe_point_position.alt;
+		return;
 	}
+
+	rtl_position.lat = NAN;
+	rtl_position.lon = NAN;
+	rtl_position.alt = NAN;
+	mavlink_log_critical(_navigator->get_mavlink_log_pub(), "RTL: invalid safe point\t");
+	events::send<uint8_t>(events::ID("rtl_invalid_safe_point"), events::Log::Error,
+			      "RTL: invalid safe point or MAV_FRAME ({1})", mission_safe_point.frame);
 }
 
 float RTL::computeReturnAltitude(const PositionYawSetpoint &rtl_position, DestinationType destination_type, float cone_half_angle_deg) const

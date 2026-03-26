@@ -246,8 +246,8 @@ private:
 	RtlBase *_rtl_mission_type_handle{nullptr};
 	RtlType _rtl_type{RtlType::RTL_DIRECT};
 
-	bool _home_has_land_approach;           ///< Flag if the home position has a land approach defined
-	bool _any_safe_point_has_land_approach; ///< Flag if a rally point has a land approach defined
+	bool _home_has_land_approach{false};           ///< Flag if the home position has a land approach defined
+	bool _any_safe_point_has_land_approach{false}; ///< Flag if a rally point has a land approach defined
 
 	uint32_t _route_plan_mission_id{0};
 	uint32_t _route_plan_safe_points_id{0};

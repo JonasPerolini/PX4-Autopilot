@@ -320,9 +320,19 @@ void RtlMissionSafePointFollow::normalizeRouteMissionItem(mission_item_s &missio
 		return;
 	}
 
-	mission_item.nav_cmd = NAV_CMD_WAYPOINT;
-	mission_item.autocontinue = true;
-	mission_item.time_inside = 0.f;
+	switch (mission_item.nav_cmd) {
+	case NAV_CMD_WAYPOINT:
+	case NAV_CMD_LOITER_UNLIMITED:
+	case NAV_CMD_LOITER_TIME_LIMIT:
+	case NAV_CMD_LOITER_TO_ALT:
+		mission_item.nav_cmd = NAV_CMD_WAYPOINT;
+		mission_item.autocontinue = true;
+		mission_item.time_inside = 0.f;
+		break;
+
+	default:
+		break;
+	}
 }
 
 bool RtlMissionSafePointFollow::currentTargetIsBranchOff() const
@@ -359,22 +369,24 @@ void RtlMissionSafePointFollow::updateLastFlownLoopSegmentForNominalAdvance()
 	MissionBase::updateLastFlownLoopSegmentForNominalAdvance(_last_flown_loop_segment);
 }
 
-bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_item, int32_t *adjacent_index)
+bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_item, int32_t &adjacent_index)
 {
 	if (_plan.selection.path.direction_reversed) {
+		// findPreviousPositionIndexNoJump() scans from start_index - 1, so reverse traversal
+		// passes current_seq to get the immediately preceding route target.
 		int32_t adjacent_route_index = _mission.current_seq;
 
 		if (!findPreviousPositionIndexNoJump(adjacent_route_index, adjacent_route_index)) {
 			return false;
 		}
 
-		if (adjacent_index != nullptr) {
-			*adjacent_index = adjacent_route_index;
-		}
+		adjacent_index = adjacent_route_index;
 
 		return loadMissionItemFromCache(adjacent_route_index, mission_item);
 
 	} else {
+		// findNextPositionIndexNoJump() includes start_index itself, so nominal traversal starts at
+		// current_seq + 1 to avoid returning the current route target again.
 		// Walk forward without following DO_JUMP control flow, matching the planner's
 		// geometry-only treatment of loop edges.
 		int32_t adjacent_route_index = _mission.current_seq + 1;
@@ -383,9 +395,7 @@ bool RtlMissionSafePointFollow::loadAdjacentRouteItem(mission_item_s &mission_it
 			return false;
 		}
 
-		if (adjacent_index != nullptr) {
-			*adjacent_index = adjacent_route_index;
-		}
+		adjacent_index = adjacent_route_index;
 
 		return loadMissionItemFromCache(adjacent_route_index, mission_item);
 	}
@@ -547,7 +557,7 @@ void RtlMissionSafePointFollow::setActiveMissionItems()
 			mission_item_s *next_route_item_ptr = nullptr;
 			int32_t adjacent_index = -1;
 
-			if (loadAdjacentRouteItem(next_route_item, &adjacent_index)) {
+			if (loadAdjacentRouteItem(next_route_item, adjacent_index)) {
 				const bool next_item_is_branch_off = _plan.selection.safe_point_found
 								     && adjacent_index == _branch_off_index;
 

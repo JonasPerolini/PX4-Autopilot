@@ -144,6 +144,11 @@ public:
 		return setNextMissionItem();
 	}
 
+	void normalizeRouteMissionItemForTest(mission_item_s &mission_item) const
+	{
+		normalizeRouteMissionItem(mission_item);
+	}
+
 private:
 	std::vector<mission_item_s> _items;
 };
@@ -389,4 +394,35 @@ TEST_F(RtlMissionSafePointFollowStageTest, ReverseRouteExhaustionTransitionsToLa
 	EXPECT_TRUE(advanced);
 	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
 	EXPECT_TRUE(executor.shouldGoStraightToGoalForTest());
+}
+
+// WHY: Route-safe-point RTL follows mission geometry, but takeoff commands carry altitude semantics
+//      that differ from a plain waypoint and must not be silently rewritten.
+// WHAT: normalizeRouteMissionItem leaves NAV_CMD_TAKEOFF unchanged.
+TEST_F(RtlMissionSafePointFollowStageTest, NormalizeRouteMissionItemPreservesTakeoffCommand)
+{
+	mission_item_s takeoff_item = makeTakeoffItem(kLat, kLon, kAlt + 30.f);
+	takeoff_item.time_inside = 12.f;
+
+	executor.normalizeRouteMissionItemForTest(takeoff_item);
+
+	EXPECT_EQ(takeoff_item.nav_cmd, NAV_CMD_TAKEOFF);
+	EXPECT_FLOAT_EQ(takeoff_item.time_inside, 12.f);
+	EXPECT_FALSE(takeoff_item.autocontinue);
+}
+
+// WHY: Loiter-style position items should still be flattened into geometry-only route waypoints
+//      so RTL does not stop and wait at intermediate loiter commands while following the route.
+// WHAT: normalizeRouteMissionItem converts NAV_CMD_LOITER_TO_ALT into NAV_CMD_WAYPOINT.
+TEST_F(RtlMissionSafePointFollowStageTest, NormalizeRouteMissionItemFlattensLoiterCommand)
+{
+	mission_item_s loiter_item = makePositionItem(kLat, kLon, kAlt + 20.f, NAV_CMD_LOITER_TO_ALT);
+	loiter_item.autocontinue = false;
+	loiter_item.time_inside = 8.f;
+
+	executor.normalizeRouteMissionItemForTest(loiter_item);
+
+	EXPECT_EQ(loiter_item.nav_cmd, NAV_CMD_WAYPOINT);
+	EXPECT_TRUE(loiter_item.autocontinue);
+	EXPECT_FLOAT_EQ(loiter_item.time_inside, 0.f);
 }
