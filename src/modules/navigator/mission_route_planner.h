@@ -453,7 +453,6 @@ private:
 	struct ProjectionBatchOutputs {
 		SegmentDistanceAlong dist_along_to_last_flown_segment{};
 		float dist_along_to_route_end{0.f};
-		uint8_t loops_remaining{0};
 	};
 
 	struct CandidateSearchState {

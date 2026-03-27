@@ -248,6 +248,85 @@ TEST_F(RtlPlannerGoalSelectionTest, FindNominalPathToGoalKeepsLoopEndWhileRepeat
 	EXPECT_FALSE(path.direction_reversed);
 }
 
+// WHY: Missions can contain multiple DO_JUMP loops, so the active loop-repeat state must come from the
+//      selected vehicle projection segment rather than from some later unrelated loop discovered during scanning.
+// WHAT: Vehicle projected on loop [2->0] keeps that loop's remaining-repeat count even when a later loop is exhausted.
+TEST_F(RtlPlannerGoalSelectionTest, CollectVehicleProjectionUsesSelectedLoopRepeatCountWhenLaterLoopsExist)
+{
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 2, 1),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 100.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 300.f, 100.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 300.f, 200.f, kAlt),
+		makeDoJump(4, 1, 1),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 400.f, 200.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+	config = defaultConfig();
+	config.execution.last_flown_loop_segment.start.idx = 2;
+	config.execution.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.end.idx = 0;
+	config.execution.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.is_loop = true;
+	config.execution.last_flown_loop_segment.loops_remaining = 1;
+
+	MissionRoutePlanner::ProjectionContext projection_context{};
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 100.f, 95.f, kAlt);
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_pos, 0, config, projection_context, reason));
+	ASSERT_TRUE(projection_context.loop_ctx.valid());
+	EXPECT_EQ(projection_context.loop_ctx.segment.start.idx, 2);
+	EXPECT_EQ(projection_context.loop_ctx.segment.end.idx, 0);
+	EXPECT_EQ(projection_context.loop_ctx.segment.loops_remaining, 1);
+	EXPECT_EQ(projection_context.mission_loops_remaining, 1);
+
+	const MissionRoutePlanner::Path path = planner.findNominalPathToGoal(8,
+					       projection_context.dist_along_to_route_end,
+					       projection_context, config);
+	ASSERT_TRUE(path.valid());
+	EXPECT_EQ(path.first_item_index, projection_context.loop_ctx.segment.end.idx);
+	EXPECT_FALSE(path.direction_reversed);
+}
+
+// WHY: The projection context must carry the remaining-loop count of the loop segment actually
+//      selected for the vehicle projection, not the last loop encountered anywhere in the mission scan.
+// WHAT: With two active loops in the mission, a projection onto the first loop reports that loop's repeat count.
+TEST_F(RtlPlannerGoalSelectionTest, CollectVehicleProjectionUsesSelectedLoopRemainingCount)
+{
+	auto items = std::vector<mission_item_s> {
+		makePositionItemFromOffset(kBaseLat, kBaseLon,   0.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f,   0.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 100.f, 100.f, kAlt),
+		makeDoJump(0, 3, 1),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 100.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 200.f, 200.f, kAlt),
+		makePositionItemFromOffset(kBaseLat, kBaseLon, 300.f, 200.f, kAlt),
+		makeDoJump(4, 5, 4),
+		makeLandItemFromOffset(kBaseLat, kBaseLon, 400.f, 200.f, kAlt - 10.f),
+	};
+	VectorProvider provider(items, {});
+	MissionRoutePlanner planner(provider);
+	config = defaultConfig();
+	config.execution.last_flown_loop_segment.start.idx = 2;
+	config.execution.last_flown_loop_segment.start.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.end.idx = 0;
+	config.execution.last_flown_loop_segment.end.nav_cmd = NAV_CMD_WAYPOINT;
+	config.execution.last_flown_loop_segment.is_loop = true;
+	config.execution.last_flown_loop_segment.loops_remaining = 2;
+
+	MissionRoutePlanner::ProjectionContext projection_context{};
+	auto vehicle_pos = makePositionFromOffset(kBaseLat, kBaseLon, 55.f, 45.f, kAlt);
+
+	ASSERT_TRUE(planner.collectVehicleProjection(vehicle_pos, 0, config, projection_context, reason));
+	ASSERT_TRUE(projection_context.seg_candidate.segment.validLoop());
+	EXPECT_EQ(projection_context.seg_candidate.segment.start.idx, 2);
+	EXPECT_EQ(projection_context.seg_candidate.segment.end.idx, 0);
+	EXPECT_EQ(projection_context.mission_loops_remaining, 2);
+}
+
 // WHY: RTL type 6 treats DO_JUMP items as geometry only and must ignore remaining loop counts
 //      when choosing the shortest return path.
 // WHAT: planRouteToGoal clears the effective loop counter and rewinds the loop when that exit is shorter.

@@ -763,10 +763,6 @@ bool MissionRoutePlanner::findProjectionCandidatesBatch(int32_t mission_index, f
 			continue;
 		}
 
-		if (segment.is_loop) {
-			outputs.loops_remaining = segment.loops_remaining;
-		}
-
 		if (!have_previous) {
 			// The first valid position-bearing item seeds the scan; a segment only exists once a second
 			// endpoint (or loop edge) has been discovered.
@@ -1026,7 +1022,11 @@ bool MissionRoutePlanner::collectVehicleProjection(const Position &vehicle_posit
 	projection_context.vehicle_vel_ne = config.state.velocity_ne;
 	projection_context.velocity_valid = config.state.velocity_valid;
 	projection_context.dist_along_to_route_end = batch_outputs.dist_along_to_route_end;
-	projection_context.mission_loops_remaining = batch_outputs.loops_remaining;
+	// Use the repeat count from the selected projection loop itself. A later DO_JUMP elsewhere
+	// in the mission must not overwrite the active loop state carried by this projection.
+	projection_context.mission_loops_remaining = projection_context.seg_candidate.segment.validLoop()
+			? projection_context.seg_candidate.segment.loops_remaining
+			: 0;
 
 	PX4_DEBUG("RTL UAV proj selected cand %d (of %u) on seg [%u->%u], path_dist=%.1f",
 		  best_candidate_index,
