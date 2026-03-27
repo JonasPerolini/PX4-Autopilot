@@ -142,15 +142,15 @@ private:
 					   const MissionRoutePlanner::Position &vehicle_position,
 					   float acceptance_radius,
 					   const MissionRoutePlanner::Plan &cached_plan,
-					   bool cached_should_go_straight_to_safe_point,
+					   bool cached_should_go_straight_to_goal,
 					   MissionRoutePlanner::Plan &new_plan) const;
 
 	/** @brief Evaluate a fresh or reusable route-safe-point plan. */
 	bool evaluateRouteSafePointPlan(const MissionRouteCache &mission_route_cache,
 					const MissionRoutePlanner::Plan &cached_plan,
-					bool cached_should_go_straight_to_safe_point,
+					bool cached_should_go_straight_to_goal,
 					MissionRoutePlanner::Plan &new_plan,
-					bool &should_go_straight_to_safe_point);
+					bool &should_go_straight_to_goal);
 
 	/** @brief Apply a valid route-safe-point plan to the RTL destination/output state. */
 	void applyRouteSafePointPlan(const MissionRoutePlanner::Plan &plan,
@@ -256,7 +256,7 @@ private:
 	RtlDirect _rtl_direct;
 
 	bool _enforce_rtl_alt{false};
-	bool _should_go_straight_to_safe_point{false};
+	bool _should_go_straight_to_goal{false};
 	MissionRoutePlanner::Plan _route_safe_point_plan{};
 	MissionRoutePlanner::Segment _last_route_safe_point_loop_segment{};
 

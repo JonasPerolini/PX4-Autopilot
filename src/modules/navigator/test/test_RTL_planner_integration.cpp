@@ -940,10 +940,10 @@ TEST_F(RtlPlannerIntegrationTest, PlanProvidesValidBranchOffIndexForSafePoint)
 	EXPECT_LE(plan.selection.path.first_item_index, branch_idx);
 }
 
-// WHY: The executor goes straight to LandAtGoal when direct_to_safe_point is set,
+// WHY: The executor goes straight to LandAtGoal when skip_route_to_safe_point is set,
 //      skipping JoinRoute and FollowRoute entirely. The plan must provide a valid
 //      goal_position for the landing item.
-// WHAT: When direct_to_safe_point is true, all landing fields are populated.
+// WHAT: When skip_route_to_safe_point is true, all landing fields are populated.
 TEST_F(RtlPlannerIntegrationTest, DirectToSafePointPlanHasCompleteLandingFields)
 {
 	std::vector<mission_item_s> mission = {
@@ -970,7 +970,7 @@ TEST_F(RtlPlannerIntegrationTest, DirectToSafePointPlanHasCompleteLandingFields)
 
 	bool ok = planner.planRouteToGoal(vehicle_pos, 0, config, plan, reason);
 	ASSERT_TRUE(ok) << "Failure reason: " << MissionRoutePlanner::failureReasonString(reason);
-	ASSERT_TRUE(plan.selection.direct_to_safe_point);
+	ASSERT_TRUE(plan.selection.skip_route_to_safe_point);
 	EXPECT_TRUE(plan.selection.goal_position.valid());
 	EXPECT_TRUE(PX4_ISFINITE(plan.selection.goal_position.lat));
 	EXPECT_TRUE(PX4_ISFINITE(plan.selection.goal_position.lon));

@@ -72,21 +72,14 @@ bool RtlMissionSafePointFollow::loadMissionItemFromCache(int32_t index, mission_
 	       && mission_route_cache->loadMissionItem(index, mission_item);
 }
 
-void RtlMissionSafePointFollow::setRoutePlan(const MissionRoutePlanner::Plan &plan)
+void RtlMissionSafePointFollow::configureRouteSafePoint(const RouteSafePointConfig &config)
 {
-	_plan = plan;
+	_plan = config.plan;
 	_branch_off_index = _plan.selection.branchOffIndex();
+	_should_go_straight_to_goal = config.should_go_straight_to_goal;
+	_goal_land_approach = config.goal_land_approach;
+	_rtl_alt = config.rtl_alt;
 	updateLastFlownLoopSegmentFromPlan();
-}
-
-void RtlMissionSafePointFollow::setShouldGoStraightToGoal(bool should_go_straight)
-{
-	_should_go_straight_to_goal = should_go_straight;
-}
-
-void RtlMissionSafePointFollow::setGoalLandApproach(const loiter_point_s &land_approach)
-{
-	_goal_land_approach = land_approach;
 }
 
 bool RtlMissionSafePointFollow::isLandingCommand(const mission_item_s &mission_item)
@@ -107,7 +100,7 @@ RtlMissionSafePointFollow::Stage RtlMissionSafePointFollow::finalGoalStage() con
 void RtlMissionSafePointFollow::on_inactivation()
 {
 	_should_go_straight_to_goal = _should_go_straight_to_goal
-				      || _plan.selection.direct_to_safe_point
+				      || _plan.selection.skip_route_to_safe_point
 				      || _stage == Stage::BranchOff
 				      || _stage == Stage::ApproachAtGoal
 				      || _stage == Stage::LandAtGoal;
@@ -136,14 +129,15 @@ void RtlMissionSafePointFollow::on_activation()
 						       && _plan.selection.path.direction_reversed
 						       && _plan.selection.path.in_first_item_acc_rad;
 
-		use_join_route = !(_should_go_straight_to_goal || _plan.selection.direct_to_safe_point || reverse_land_from_takeoff);
+		use_join_route = !(_should_go_straight_to_goal || _plan.selection.skip_route_to_safe_point
+				   || reverse_land_from_takeoff);
 		_stage = use_join_route ? Stage::FollowRoute : finalGoalStage();
 
 		PX4_DEBUG("RTL to %s target=%d rev=%u straight=%u stage=%u branch_off=%d",
 			  MissionRoutePlanner::goalTypeString(_plan.selection.goal_type),
 			  static_cast<int>(_plan.selection.path.first_item_index),
 			  static_cast<unsigned>(_plan.selection.path.direction_reversed),
-			  static_cast<unsigned>(_should_go_straight_to_goal || _plan.selection.direct_to_safe_point),
+			  static_cast<unsigned>(_should_go_straight_to_goal || _plan.selection.skip_route_to_safe_point),
 			  static_cast<unsigned>(_stage),
 			  static_cast<int>(_branch_off_index));
 

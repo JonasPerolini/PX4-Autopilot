@@ -126,7 +126,7 @@ public:
 
 	void setGoalLandApproachForTest(const loiter_point_s &land_approach)
 	{
-		setGoalLandApproach(land_approach);
+		_goal_land_approach = land_approach;
 	}
 
 	int32_t transitionTargetIndexForTest() const
