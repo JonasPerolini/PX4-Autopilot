@@ -397,6 +397,21 @@ TEST_F(RtlMissionSafePointFollowStageTest, NormalizeRouteMissionItemPreservesTak
 	EXPECT_FALSE(takeoff_item.autocontinue);
 }
 
+// WHY: Mission-endpoint fallback keys off the actual endpoint command encountered on the route,
+//      so landing commands must remain intact instead of being flattened into route waypoints.
+// WHAT: normalizeRouteMissionItem leaves NAV_CMD_LAND unchanged.
+TEST_F(RtlMissionSafePointFollowStageTest, NormalizeRouteMissionItemPreservesLandingCommand)
+{
+	mission_item_s landing_item = makeLandItem(kBaseLat, kBaseLon, kAlt - 5.f);
+	landing_item.time_inside = 9.f;
+
+	executor.normalizeRouteMissionItemForTest(landing_item);
+
+	EXPECT_EQ(landing_item.nav_cmd, NAV_CMD_LAND);
+	EXPECT_FLOAT_EQ(landing_item.time_inside, 9.f);
+	EXPECT_FALSE(landing_item.autocontinue);
+}
+
 // WHY: Loiter-style position items should still be flattened into geometry-only route waypoints
 //      so RTL does not stop and wait at intermediate loiter commands while following the route.
 // WHAT: normalizeRouteMissionItem converts NAV_CMD_LOITER_TO_ALT into NAV_CMD_WAYPOINT.

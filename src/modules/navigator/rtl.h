@@ -107,8 +107,6 @@ private:
 		DESTINATION_TYPE_LAST_LINK_POSITION
 	};
 
-private:
-
 	/**
 	 * @brief Check mission landing validity
 	 * @return true if mission has a land start, a land and is valid
@@ -237,6 +235,7 @@ private:
 	bool _home_has_land_approach{false};           ///< Flag if the home position has a land approach defined
 	bool _any_safe_point_has_land_approach{false}; ///< Flag if a rally point has a land approach defined
 
+	uint32_t _last_route_safe_point_warning_mission_id{0};
 	uint32_t _route_plan_mission_id{0};
 	uint32_t _route_plan_safe_points_id{0};
 	PositionYawSetpoint _last_position_before_link_loss{(double)NAN, (double)NAN, NAN, NAN};
