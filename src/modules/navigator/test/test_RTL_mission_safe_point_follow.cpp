@@ -86,20 +86,18 @@ public:
 		_mission = {};
 		_mission.count = static_cast<int32_t>(items.size());
 		_mission.current_seq = 0;
-		_stage = Stage::Idle;
-		_branch_off_index = -1;
-		_transition_target_index = -1;
+		_state = {};
 		_plan = {};
 	}
 
 	void setStageForTest(Stage stage)
 	{
-		_stage = stage;
+		_state.stage = stage;
 	}
 
 	Stage stageForTest() const
 	{
-		return _stage;
+		return _state.stage;
 	}
 
 	void setCurrentSequenceForTest(int32_t index)
@@ -114,12 +112,12 @@ public:
 		_plan.selection.safe_point_found = true;
 		_plan.selection.goal_type = MissionRoutePlanner::GoalType::SafePoint;
 		_plan.selection.path.direction_reversed = direction_reversed;
-		_branch_off_index = branch_off_index;
+		_state.branch_off_index = branch_off_index;
 	}
 
 	void setTransitionTargetIndexForTest(int32_t index)
 	{
-		_transition_target_index = index;
+		_state.transition_target_index = index;
 	}
 
 	void setGoalLandApproachForTest(const loiter_point_s &land_approach)
@@ -129,7 +127,7 @@ public:
 
 	int32_t transitionTargetIndexForTest() const
 	{
-		return _transition_target_index;
+		return _state.transition_target_index;
 	}
 
 	bool advanceStageForTest()
@@ -140,6 +138,11 @@ public:
 	void normalizeRouteMissionItemForTest(mission_item_s &mission_item) const
 	{
 		normalizeRouteMissionItem(mission_item);
+	}
+
+	void resetExecutorProgressForTest()
+	{
+		resetExecutorProgress();
 	}
 
 private:
@@ -360,6 +363,23 @@ TEST_F(RtlMissionSafePointFollowStageTest, ReverseRouteExhaustionTransitionsToLa
 	// THEN: The executor keeps RTL alive by handing over to the landing stage.
 	EXPECT_TRUE(advanced);
 	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::LandAtGoal);
+}
+
+// WHY: Inactive executors should not keep reporting a landing stage from a previous run.
+// WHAT: Resetting transient executor progress clears the stage and remembered transition target.
+TEST_F(RtlMissionSafePointFollowStageTest, ResetExecutorProgressClearsStageAndTransitionTarget)
+{
+	executor.loadTestMission({
+		makePositionItem(kBaseLat, kBaseLon, kAlt),
+		makePositionItem(kBaseLat + 0.001, kBaseLon, kAlt),
+	});
+	executor.setStageForTest(RtlMissionSafePointFollowTestPeer::Stage::ApproachAtGoal);
+	executor.setTransitionTargetIndexForTest(1);
+
+	executor.resetExecutorProgressForTest();
+
+	EXPECT_EQ(executor.stageForTest(), RtlMissionSafePointFollowTestPeer::Stage::Idle);
+	EXPECT_EQ(executor.transitionTargetIndexForTest(), -1);
 }
 
 // WHY: Route-safe-point RTL follows mission geometry, but takeoff commands carry altitude semantics
