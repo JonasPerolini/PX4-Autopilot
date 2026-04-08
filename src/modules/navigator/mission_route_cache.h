@@ -51,7 +51,7 @@
 class MissionRouteCache : public MissionRoutePlanner::Provider
 {
 public:
-	static constexpr hrt_abstime MAX_DATAMAN_LOAD_WAIT{500000}; // 500 ms
+	static constexpr hrt_abstime CACHE_ONLY_LOAD_WAIT{0}; // Planner/provider reads must not block on cache misses.
 	static constexpr hrt_abstime CACHE_RETRY_BACKOFF{500000}; // 500 ms
 	static constexpr uint8_t MAX_RETRY_BACKOFF_SHIFT{3}; // Retry 3+: 500ms << 3 = 500ms * 2^3 = 4000 ms (4 sec) wait.
 	static constexpr int32_t MAX_ROUTE_MISSION_CACHE_SIZE{CONFIG_RTL_MISSION_CACHE_SIZE};
@@ -164,8 +164,8 @@ private:
 	void resetSafePointCacheState(bool clear_source_identity);
 
 	// MissionRouteCache is used from Navigator's single-threaded work-loop. The mutable caches
-	// allow const planner/provider methods to service loadWait() misses under that assumption.
-	mutable DatamanCache _dataman_cache_mission{"navigator_dm_cache_route_mission", 0};
+	// allow const planner/provider methods to read preloaded RAM entries without blocking.
+	mutable DatamanCache _dataman_cache_mission{"navigator_dm_cache_route_mission", MAX_ROUTE_MISSION_CACHE_SIZE};
 	mutable DatamanCache _dataman_cache_safepoint{"navigator_dm_cache_route_safepoint", INITIAL_SAFEPOINT_CACHE_SIZE};
 	mutable DatamanCache _dataman_cache_land_item{"navigator_dm_cache_route_land", INITIAL_LAND_ITEM_CACHE_SIZE};
 	DatamanClient &_dataman_client_safepoint = _dataman_cache_safepoint.client();

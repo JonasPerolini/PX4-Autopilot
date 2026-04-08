@@ -72,12 +72,8 @@ bool MissionRouteCache::queueMissionCacheLoads(const mission_s &mission)
 	// Rebuild the mission cache from scratch, callers retry the full queue on failure.
 	_dataman_cache_mission.invalidate();
 
-	if (static_cast<int32_t>(_dataman_cache_mission.size()) != mission.count) {
-		_dataman_cache_mission.resize(mission.count);
-	}
-
-	if (static_cast<int32_t>(_dataman_cache_mission.size()) != mission.count) {
-		PX4_ERR("Mission cache resize failed! requested: %d, actual: %d",
+	if (static_cast<int32_t>(_dataman_cache_mission.size()) < mission.count) {
+		PX4_ERR("Mission cache capacity too small! requested: %d, capacity: %d",
 			static_cast<int>(mission.count), static_cast<int>(_dataman_cache_mission.size()));
 		return false;
 	}
@@ -172,12 +168,13 @@ int MissionRouteCache::missionCount() const
 
 bool MissionRouteCache::loadMissionItem(int index, mission_item_s &mission_item) const
 {
+	// Planner-facing reads are cache-only so route RTL falls back instead of stalling Navigator on SD-card misses.
 	return !_mission.too_large
 	       && _mission.ready
 	       && index >= 0 && index < _mission.count
 	       && _dataman_cache_mission.loadWait(static_cast<dm_item_t>(_mission.dataman_id), index,
 			       reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
-			       MAX_DATAMAN_LOAD_WAIT);
+			       CACHE_ONLY_LOAD_WAIT);
 }
 
 int MissionRouteCache::safePointCount() const
@@ -191,7 +188,7 @@ bool MissionRouteCache::loadSafePointItem(int index, mission_item_s &safe_point_
 	       && index >= 0 && index < _safe_point.stats.num_items
 	       && _dataman_cache_safepoint.loadWait(static_cast<dm_item_t>(_safe_point.stats.dataman_id), index,
 			       reinterpret_cast<uint8_t *>(&safe_point_item), sizeof(safe_point_item),
-			       MAX_DATAMAN_LOAD_WAIT);
+			       CACHE_ONLY_LOAD_WAIT);
 }
 
 bool MissionRouteCache::getMissionLandItem(int32_t &index, mission_item_s &land_item) const
@@ -203,7 +200,7 @@ bool MissionRouteCache::getMissionLandItem(int32_t &index, mission_item_s &land_
 	index = _mission_land.index;
 	return _dataman_cache_land_item.loadWait(static_cast<dm_item_t>(_mission_land.dataman_id), index,
 			reinterpret_cast<uint8_t *>(&land_item), sizeof(land_item),
-			MAX_DATAMAN_LOAD_WAIT);
+			CACHE_ONLY_LOAD_WAIT);
 }
 
 bool MissionRouteCache::loadMissionItem(const mission_s &mission, int32_t index, mission_item_s &mission_item) const
