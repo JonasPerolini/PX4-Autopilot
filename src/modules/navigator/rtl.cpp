@@ -104,11 +104,20 @@ void RTL::updateDatamanCache()
 	if (_param_rtl_type.get() == RTL_TYPE_ROUTE_SAFE_POINT
 	    && mission_route_cache->missionExceedsCacheLimit(mission)) {
 		if (mission.mission_id != _last_route_safe_point_warning_mission_id) {
-			mavlink_log_warning(_navigator->get_mavlink_log_pub(),
-					    "Mission exceeds %d items. Route RTL unavailable, falling back to direct RTL.\t",
-					    static_cast<int>(MissionRouteCache::MAX_ROUTE_MISSION_CACHE_SIZE));
-			events::send(events::ID("rtl_route_mission_too_large"), events::Log::Warning,
-				     "Mission exceeds route RTL cache limit, falling back to direct RTL");
+			if (MissionRouteCache::MAX_ROUTE_MISSION_CACHE_SIZE > 0) {
+				mavlink_log_warning(_navigator->get_mavlink_log_pub(),
+						    "Mission exceeds %d items. Route RTL unavailable, falling back to direct RTL.\t",
+						    static_cast<int>(MissionRouteCache::MAX_ROUTE_MISSION_CACHE_SIZE));
+				events::send(events::ID("rtl_route_mission_too_large"), events::Log::Warning,
+					     "Mission exceeds route RTL cache limit, falling back to direct RTL");
+
+			} else {
+				mavlink_log_warning(_navigator->get_mavlink_log_pub(),
+						    "Route RTL mission cache disabled on this board, falling back to direct RTL.\t");
+				events::send(events::ID("rtl_route_cache_disabled"), events::Log::Warning,
+					     "Route RTL mission cache disabled on this board, falling back to direct RTL");
+			}
+
 			_last_route_safe_point_warning_mission_id = mission.mission_id;
 		}
 	}
