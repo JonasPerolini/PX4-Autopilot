@@ -30,10 +30,11 @@ menuconfig NAVIGATOR_ADSB
 
 menuconfig RTL_MISSION_CACHE_SIZE
 	int "Maximum number of mission items cached for route-based RTL (RTL_TYPE=6)"
-	default 300
+	default 0
 	depends on MODULES_NAVIGATOR
 	---help---
-		Maximum number of mission items that can be cached for the smart mission join when switching back to mission
+		Maximum number of mission items reserved in RAM for the smart mission join when switching back to mission
 		and for the Route Safe Point Return mode (RTL_TYPE=6). Missions exceeding this size will fall back to joining
 		the mission to the last flown segment and to the default mission direct RTL.
-		Each cached item uses approximately 76 bytes of heap.
+		Set this to 0 to disable route-mission caching on boards that have not been sized for the extra RAM.
+		Each reserved cached item uses approximately 76 bytes of heap for the lifetime of Navigator.
