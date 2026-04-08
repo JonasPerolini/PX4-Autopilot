@@ -261,12 +261,15 @@ void DatamanClient::clearPendingResponse()
 		return;
 	}
 
+	// Every async entry point drains queued replies first so a response from an
+	// aborted or timed-out operation cannot be matched to the next request.
 	bool updated = false;
 	orb_check(_dataman_response_sub, &updated);
 
-	if (updated) {
+	while (updated) {
 		dataman_response_s response{};
 		orb_copy(ORB_ID(dataman_response), _dataman_response_sub, &response);
+		orb_check(_dataman_response_sub, &updated);
 	}
 }
 
@@ -284,6 +287,7 @@ bool DatamanClient::readAsync(dm_item_t item, uint32_t index, uint8_t *buffer, u
 	bool success = false;
 
 	if (_state == State::Idle) {
+		// Drop any queued stale replies before publishing a fresh async request.
 		clearPendingResponse();
 
 		hrt_abstime timestamp = hrt_absolute_time();
@@ -327,6 +331,7 @@ bool DatamanClient::writeAsync(dm_item_t item, uint32_t index, uint8_t *buffer, 
 	bool success = false;
 
 	if (_state == State::Idle) {
+		// Drop any queued stale replies before publishing a fresh async request.
 		clearPendingResponse();
 
 		hrt_abstime timestamp = hrt_absolute_time();
@@ -367,6 +372,7 @@ bool DatamanClient::clearAsync(dm_item_t item)
 	bool success = false;
 
 	if (_state == State::Idle) {
+		// Drop any queued stale replies before publishing a fresh async request.
 		clearPendingResponse();
 
 		hrt_abstime timestamp = hrt_absolute_time();
