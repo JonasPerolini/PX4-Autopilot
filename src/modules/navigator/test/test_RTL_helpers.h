@@ -46,15 +46,20 @@
 
 #include <gtest/gtest.h>
 
+#include "mission_route_cache.h"
 #include "mission_route_planner.h"
 
 #include <lib/geo/geo.h>
 #include <parameters/param.h>
+#include <px4_platform_common/log.h>
 #include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
 #include <uORB/topics/vtol_vehicle_status.h>
 
+#include <inttypes.h>
 #include <cmath>
 #include <vector>
+
+using namespace time_literals;
 
 
 /**
@@ -338,6 +343,218 @@ protected:
 	}
 
 	static void TearDownTestSuite() {}
+};
+
+/**
+ * @brief Test-only peer for deterministic DatamanClient progress without public helper APIs.
+ */
+class DatamanClientTestPeer
+{
+public:
+	static bool waitForOperation(DatamanClient &client, hrt_abstime timeout)
+	{
+		if (client._state != DatamanClient::State::RequestSent) {
+			return true;
+		}
+
+		const hrt_abstime start_time = hrt_absolute_time();
+
+		do {
+			client.update();
+
+			if (client._state != DatamanClient::State::RequestSent) {
+				return true;
+			}
+
+			const hrt_abstime elapsed = hrt_elapsed_time(&start_time);
+
+			if (elapsed >= timeout) {
+				break;
+			}
+
+			const hrt_abstime remaining = timeout - elapsed;
+			const uint32_t timeout_ms = (remaining >= 100_ms) ? 100U :
+						    (remaining > 1000) ? static_cast<uint32_t>(remaining / 1000) : 1U;
+			const int32_t ret = px4_poll(&client._fds, 1, timeout_ms);
+
+			if (ret < 0) {
+				PX4_ERR("px4_poll returned error: %" PRIi32, ret);
+				break;
+			}
+
+		} while (true);
+
+		client.update();
+		return client._state != DatamanClient::State::RequestSent;
+	}
+};
+
+/**
+ * @brief Test-only peer for advancing one queued DatamanCache operation deterministically.
+ */
+class DatamanCacheTestPeer
+{
+public:
+	static bool processNextBlocking(DatamanCache &cache, hrt_abstime timeout)
+	{
+		if (cache._item_counter == 0) {
+			return true;
+		}
+
+		cache.update();
+
+		if (cache._item_counter == 0) {
+			return true;
+		}
+
+		if (cache._items[cache._update_index].cache_state == DatamanCache::State::RequestSent) {
+			if (!DatamanClientTestPeer::waitForOperation(cache._client, timeout)) {
+				return false;
+			}
+
+			cache.update();
+		}
+
+		return true;
+	}
+};
+
+/**
+ * @brief Friend-backed helper for deterministically driving MissionRouteCache in tests.
+ *
+ * The helper advances one async cache event at a time by blocking on the real
+ * dataman response fd, which lets tests stop at precise intermediate states
+ * without wall-clock sleeps.
+ */
+class MissionRouteCacheTestPeer
+{
+public:
+	static bool missionRetryScheduled(const MissionRouteCache &cache)
+	{
+		return cache._mission.retry_at != 0;
+	}
+
+	static uint8_t missionRetryCount(const MissionRouteCache &cache)
+	{
+		return cache._mission.retry_count;
+	}
+
+	static bool safePointRetryScheduled(const MissionRouteCache &cache)
+	{
+		return cache._safe_point.retry_at != 0;
+	}
+
+	static bool safePointLoadInProgress(const MissionRouteCache &cache)
+	{
+		return cache._safe_point.dataman_state == MissionRouteCache::SafePointDatamanState::Load
+		       && cache._dataman_cache_safepoint.isLoading();
+	}
+
+	static bool queueMissionCacheLoads(MissionRouteCache &cache, const mission_s &mission)
+	{
+		return cache.queueMissionCacheLoads(mission);
+	}
+
+	static bool preparePartialMissionCache(MissionRouteCache &cache, const mission_s &mission, uint32_t cached_index)
+	{
+		cache._mission = {};
+		cache._mission.id = mission.mission_id;
+		cache._mission.count = mission.count;
+		cache._mission.dataman_id = mission.mission_dataman_id;
+		cache._mission.validation_pending = true;
+		cache._dataman_cache_mission.invalidate();
+
+		if (static_cast<int32_t>(cache._dataman_cache_mission.size()) < mission.count) {
+			return false;
+		}
+
+		return cache._dataman_cache_mission.load(static_cast<dm_item_t>(mission.mission_dataman_id), cached_index);
+	}
+
+	template<typename Predicate>
+	static bool updateUntil(MissionRouteCache &cache, const mission_s &mission, Predicate &&predicate,
+				hrt_abstime timeout = 5_s)
+	{
+		const hrt_abstime start_time = hrt_absolute_time();
+
+		while (hrt_elapsed_time(&start_time) < timeout) {
+			cache.update(mission);
+
+			if (predicate()) {
+				return true;
+			}
+
+			const hrt_abstime elapsed = hrt_elapsed_time(&start_time);
+			const hrt_abstime remaining = (elapsed < timeout) ? (timeout - elapsed) : 0;
+
+			if (!progressOneEvent(cache, mission, remaining)) {
+				break;
+			}
+
+			if (predicate()) {
+				return true;
+			}
+		}
+
+		cache.update(mission);
+		return predicate();
+	}
+
+private:
+	static bool progressOneEvent(MissionRouteCache &cache, const mission_s &mission, hrt_abstime timeout)
+	{
+		if (cache._mission.validation_pending && cache._dataman_cache_mission.isLoading()) {
+			return DatamanCacheTestPeer::processNextBlocking(cache._dataman_cache_mission, timeout);
+		}
+
+		if (cache._mission_land.index >= 0 && cache._dataman_cache_land_item.isLoading()) {
+			return DatamanCacheTestPeer::processNextBlocking(cache._dataman_cache_land_item, timeout);
+		}
+
+		if (cache._safe_point.dataman_state == MissionRouteCache::SafePointDatamanState::UpdateRequestWait
+		    && cache._safe_point.update_requested
+		    && cache._safe_point.retry_at == 0) {
+			cache.update(mission);
+			return true;
+		}
+
+		if (cache._safe_point.dataman_state == MissionRouteCache::SafePointDatamanState::Read) {
+			cache.update(mission);
+			return true;
+		}
+
+		if (cache._safe_point.dataman_state == MissionRouteCache::SafePointDatamanState::ReadWait) {
+			if (!DatamanClientTestPeer::waitForOperation(cache._dataman_client_safepoint, timeout)) {
+				return false;
+			}
+
+			cache.update(mission);
+			return true;
+		}
+
+		if (cache._safe_point.dataman_state == MissionRouteCache::SafePointDatamanState::Load
+		    && cache._dataman_cache_safepoint.isLoading()) {
+			return DatamanCacheTestPeer::processNextBlocking(cache._dataman_cache_safepoint, timeout);
+		}
+
+		bool forced_retry = false;
+
+		if (cache._mission.retry_at != 0) {
+			cache._mission.retry_at = 0;
+			forced_retry = true;
+		}
+
+		if (cache._safe_point.retry_at != 0) {
+			cache._safe_point.retry_at = 0;
+			forced_retry = true;
+		}
+
+		if (forced_retry) {
+			cache.update(mission);
+		}
+
+		return forced_retry;
+	}
 };
 
 /**

@@ -42,6 +42,9 @@
 
 using namespace time_literals;
 
+class DatamanClientTestPeer;
+class DatamanCacheTestPeer;
+
 class DatamanClient
 {
 public:
@@ -154,6 +157,7 @@ public:
 	void abortCurrentOperation();
 
 private:
+	friend class DatamanClientTestPeer;
 
 	enum class State {
 		Idle,
@@ -290,6 +294,7 @@ public:
 	int size() const { return _num_items; }
 
 private:
+	friend class DatamanCacheTestPeer;
 
 	enum class State {
 		Idle,

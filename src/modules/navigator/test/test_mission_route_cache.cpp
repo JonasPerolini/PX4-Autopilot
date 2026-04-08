@@ -43,7 +43,6 @@
 #include <gtest/gtest.h>
 
 #include <drivers/drv_hrt.h>
-#include <px4_platform_common/time.h>
 
 #include "mission_route_cache.h"
 #include "test_RTL_helpers.h"
@@ -53,52 +52,6 @@
 using rtl_test_reference::kAlt;
 using rtl_test_reference::kBaseLat;
 using rtl_test_reference::kBaseLon;
-
-static constexpr int kMissionRouteCacheMaxPolls = 4096;
-static constexpr useconds_t kMissionRouteCachePollSleepUs = 1000;
-
-/**
- * @brief Test class for error handling and helper behavior that is
- *        not observable through public methods.
- */
-class MissionRouteCacheTestPeer
-{
-public:
-	static bool missionRetryScheduled(const MissionRouteCache &cache)
-	{
-		return cache._mission.retry_at != 0;
-	}
-
-	static uint8_t missionRetryCount(const MissionRouteCache &cache)
-	{
-		return cache._mission.retry_count;
-	}
-
-	static bool queueMissionCacheLoads(MissionRouteCache &cache, const mission_s &mission)
-	{
-		return cache.queueMissionCacheLoads(mission);
-	}
-
-	static bool preparePartialMissionCache(MissionRouteCache &cache, const mission_s &mission, uint32_t cached_index)
-	{
-		cache._mission = {};
-		cache._mission.id = mission.mission_id;
-		cache._mission.count = mission.count;
-		cache._mission.dataman_id = mission.mission_dataman_id;
-		cache._mission.validation_pending = true;
-		cache._dataman_cache_mission.invalidate();
-
-		if (cache._dataman_cache_mission.size() != mission.count) {
-			cache._dataman_cache_mission.resize(mission.count);
-		}
-
-		if (cache._dataman_cache_mission.size() != mission.count) {
-			return false;
-		}
-
-		return cache._dataman_cache_mission.load(static_cast<dm_item_t>(mission.mission_dataman_id), cached_index);
-	}
-};
 
 class MissionRouteCacheTest : public NavigatorDatamanTestBase
 {
@@ -180,30 +133,6 @@ protected:
 		EXPECT_EQ(actual.autocontinue, expected.autocontinue);
 	}
 
-	template<typename Predicate>
-	bool updateUntil(const mission_s &mission, Predicate &&predicate, int max_polls = kMissionRouteCacheMaxPolls)
-	{
-		for (int poll = 0; poll < max_polls; ++poll) {
-			_cache.update(mission);
-
-			if (predicate()) {
-				return true;
-			}
-
-			px4_usleep(kMissionRouteCachePollSleepUs);
-		}
-
-		return false;
-	}
-
-	void updateFor(const mission_s &mission, int polls)
-	{
-		for (int poll = 0; poll < polls; ++poll) {
-			_cache.update(mission);
-			px4_usleep(kMissionRouteCachePollSleepUs);
-		}
-	}
-
 	DatamanClient _dataman_client{};
 	MissionRouteCache _cache{};
 };
@@ -230,8 +159,8 @@ TEST_F(MissionRouteCacheTest, MissionCacheLoadsAllMissionItems)
 	writeMissionItems(mission_items);
 
 	// WHEN: The cache is updated until the mission becomes ready.
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.isReady(mission); }))
-			<< "MissionRouteCache did not finish loading a valid mission";
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] { return _cache.isReady(mission); }))
+			<< "MissionRouteCache did not finish loading a valid mission within the deterministic cache driver timeout";
 
 	// THEN: The mission count is reported correctly and every cached item matches the source.
 	ASSERT_EQ(_cache.missionCount(), static_cast<int>(mission_items.size()));
@@ -253,7 +182,8 @@ TEST_F(MissionRouteCacheTest, MissionCacheSchedulesRetryWhenCacheIsIncomplete)
 	ASSERT_TRUE(MissionRouteCacheTestPeer::preparePartialMissionCache(_cache, mission, 0));
 
 	// WHEN: The cache is updated until validation runs on the incomplete mission cache.
-	ASSERT_TRUE(updateUntil(mission, [&] { return MissionRouteCacheTestPeer::missionRetryScheduled(_cache); }))
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission,
+			[&] { return MissionRouteCacheTestPeer::missionRetryScheduled(_cache); }))
 			<< "MissionRouteCache did not schedule a retry after mission cache validation failed";
 
 	// THEN: The mission stays unavailable and the retry counter advances.
@@ -273,7 +203,7 @@ TEST_F(MissionRouteCacheTest, MissionCacheRejectsTooLargeMission)
 	const mission_s mission = makeMission(19, static_cast<uint16_t>(MissionRouteCache::MAX_ROUTE_MISSION_CACHE_SIZE + 1));
 
 	// WHEN: The cache processes the new mission and the private queue helper is asked to queue it.
-	updateFor(mission, 8);
+	_cache.update(mission);
 	const bool queued = MissionRouteCacheTestPeer::queueMissionCacheLoads(_cache, mission);
 
 	// THEN: The mission is rejected from caching and never becomes ready.
@@ -297,9 +227,13 @@ TEST_F(MissionRouteCacheTest, MissionLandItemLoadsReferencedWaypoint)
 	const mission_s mission = makeMission(20, static_cast<uint16_t>(mission_items.size()), 0, land_index_expected);
 	writeMissionItems(mission_items);
 
-	// WHEN: The mission cache is updated until the mission is ready.
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.isReady(mission); }))
-			<< "MissionRouteCache did not finish loading the mission before land item lookup";
+	// WHEN: The mission cache is updated until both the mission and the dedicated land-item cache are readable.
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] {
+		int32_t ready_index = -1;
+		mission_item_s ready_land_item{};
+		return _cache.isReady(mission) && _cache.getMissionLandItem(ready_index, ready_land_item);
+	}))
+			<< "MissionRouteCache did not finish loading the mission and land item before lookup within the deterministic cache driver timeout";
 
 	// THEN: The dedicated land-item cache returns the published landing waypoint and index.
 	int32_t land_index = -1;
@@ -324,8 +258,8 @@ TEST_F(MissionRouteCacheTest, MissionLandItemRejectsOutOfBoundsPublishedIndex)
 	writeMissionItems(mission_items);
 
 	// WHEN: The mission cache is updated until the mission itself is ready.
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.isReady(mission); }))
-			<< "MissionRouteCache did not finish loading the mission with an invalid published land index";
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] { return _cache.isReady(mission); }))
+			<< "MissionRouteCache did not finish loading the mission with an invalid published land index within the deterministic cache driver timeout";
 
 	// THEN: The mission stays usable, but no mission land item is exposed.
 	int32_t land_index = -1;
@@ -340,7 +274,9 @@ TEST_F(MissionRouteCacheTest, SafePointCacheRetriesAfterInvalidStateWithoutIdCha
 	// GIVEN: A safe-point state entry that is temporarily invalid for the current safe_points_id.
 	const mission_s mission = makeMission(0, 0, 41);
 	writeSafePointState(DM_KEY_SAFE_POINTS_MAX + 1, 0);
-	updateFor(mission, 256);
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission,
+			[&] { return MissionRouteCacheTestPeer::safePointRetryScheduled(_cache); }))
+			<< "MissionRouteCache did not schedule a retry after an invalid safe-point state read";
 	EXPECT_FALSE(_cache.safePointsReady());
 
 	const std::vector<mission_item_s> safe_points{
@@ -349,7 +285,7 @@ TEST_F(MissionRouteCacheTest, SafePointCacheRetriesAfterInvalidStateWithoutIdCha
 	writeSafePointItems(safe_points, static_cast<uint16_t>(safe_points.size()), 0);
 
 	// WHEN: The valid safe-point state replaces the bad one and the cache keeps updating.
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.safePointsReady(); }))
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] { return _cache.safePointsReady(); }))
 			<< "MissionRouteCache did not retry the safe-point state read after a transient error";
 
 	// THEN: The safe point becomes available.
@@ -376,8 +312,8 @@ TEST_F(MissionRouteCacheTest, SafePointIdChangeReloadsWhenOpaqueIdStaysTheSame)
 	writeSafePointItems(safe_points_a, static_cast<uint16_t>(safe_points_a.size()), 77);
 
 	// WHEN: The first set loads, then safe_points_id changes to a new set with the same opaque_id.
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.safePointsReady(); }))
-			<< "Initial safe-point cache load did not complete";
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] { return _cache.safePointsReady(); }))
+			<< "Initial safe-point cache load did not complete within the deterministic cache driver timeout";
 
 	mission_item_s safe_point{};
 	ASSERT_TRUE(_cache.loadSafePointItem(0, safe_point));
@@ -387,8 +323,8 @@ TEST_F(MissionRouteCacheTest, SafePointIdChangeReloadsWhenOpaqueIdStaysTheSame)
 	mission.safe_points_id = 101;
 	mission.timestamp = hrt_absolute_time();
 
-	ASSERT_TRUE(updateUntil(mission, [&] { return _cache.safePointsReady(); }))
-			<< "Safe-point cache did not reload after safe_points_id changed";
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission, [&] { return _cache.safePointsReady(); }))
+			<< "Safe-point cache did not reload after safe_points_id changed within the deterministic cache driver timeout";
 
 	// THEN: The cache exposes the new safe-point set instead of the stale one.
 	ASSERT_TRUE(_cache.loadSafePointItem(0, safe_point));
@@ -417,14 +353,16 @@ TEST_F(MissionRouteCacheTest, SafePointSourceChangeDuringLoadDoesNotExposeStaleD
 	writeSafePointItems(safe_points_a, static_cast<uint16_t>(safe_points_a.size()), 11);
 
 	// WHEN: The source changes before the first set is fully loaded.
-	updateFor(mission_a, 8);
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission_a,
+			[&] { return MissionRouteCacheTestPeer::safePointLoadInProgress(_cache); }))
+			<< "Safe-point cache did not enter in-flight load before the source changed";
 	ASSERT_FALSE(_cache.safePointsReady());
 
 	mission_s mission_b = makeMission(0, 0, 201);
 	writeSafePointItems(safe_points_b, static_cast<uint16_t>(safe_points_b.size()), 12);
 
-	ASSERT_TRUE(updateUntil(mission_b, [&] { return _cache.safePointsReady(); }))
-			<< "Safe-point cache did not finish reloading after the source changed mid-update";
+	ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(_cache, mission_b, [&] { return _cache.safePointsReady(); }))
+			<< "Safe-point cache did not finish reloading after the source changed mid-update within the deterministic cache driver timeout";
 
 	// THEN: Only the replacement safe-point set is visible.
 	mission_item_s safe_point{};

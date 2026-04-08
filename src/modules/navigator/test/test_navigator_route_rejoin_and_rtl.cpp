@@ -46,7 +46,6 @@
 #include <dataman_client/DatamanClient.hpp>
 #include <drivers/drv_hrt.h>
 #include <parameters/param.h>
-#include <px4_platform_common/time.h>
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/home_position.h>
@@ -69,9 +68,6 @@
 using rtl_test_reference::kAlt;
 using rtl_test_reference::kBaseLat;
 using rtl_test_reference::kBaseLon;
-
-static constexpr int kRouteCacheReadyMaxPolls = 2048;
-static constexpr useconds_t kRouteCachePollSleepUs = 1000;
 
 /**
  * @brief Mission peer that exposes smart-rejoin state for navigator-level tests.
@@ -294,20 +290,9 @@ protected:
 	{
 		MissionRouteCache *route_cache = navigator.get_mission_route_cache();
 		ASSERT_NE(route_cache, nullptr);
-
-		for (int poll_count = 0; poll_count < kRouteCacheReadyMaxPolls; ++poll_count) {
-			route_cache->update(mission);
-
-			if (route_cache->isReady(mission) && route_cache->safePointsReady()) {
-				return;
-			}
-
-			// Dataman replies are produced by a separate worker thread, so yield between
-			// bounded polls instead of spinning in a tight loop that can starve the worker.
-			px4_usleep(kRouteCachePollSleepUs);
-		}
-
-		FAIL() << "MissionRouteCache did not become ready within " << kRouteCacheReadyMaxPolls << " polls";
+		ASSERT_TRUE(MissionRouteCacheTestPeer::updateUntil(*route_cache, mission,
+				[&] { return route_cache->isReady(mission) && route_cache->safePointsReady(); }))
+				<< "MissionRouteCache did not become ready within the deterministic cache driver timeout";
 	}
 
 	DatamanClient _dataman_client{};
