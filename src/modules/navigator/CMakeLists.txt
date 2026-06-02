@@ -34,6 +34,12 @@
 add_subdirectory(GeofenceBreachAvoidance)
 add_subdirectory(MissionFeasibility)
 
+px4_add_library(navigator_mission_route_planner
+	mission_route_planner.cpp
+)
+
+target_link_libraries(navigator_mission_route_planner PUBLIC geo)
+
 if(BUILD_TESTING)
 	add_subdirectory(test)
 endif()
@@ -41,6 +47,7 @@ endif()
 set(NAVIGATOR_SOURCES
 	navigator_main.cpp
 	navigator_mode.cpp
+	mission_route_cache.cpp
 	mission_base.cpp
 	mission_block.cpp
 	mission.cpp
@@ -81,5 +88,6 @@ px4_add_module(
 		geofence_breach_avoidance
 		motion_planning
 		mission_feasibility_checker
+		navigator_mission_route_planner
 		rtl_time_estimator
 	)
