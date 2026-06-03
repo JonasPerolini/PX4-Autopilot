@@ -4,9 +4,8 @@ PX4 includes mission-route planning infrastructure in Navigator for code paths t
 It provides a non-blocking full-route cache and a stateless planner that can project vehicle and safe-point positions onto the mission path.
 
 ::: info
-This page documents developer infrastructure.
-The infrastructure does not, by itself, enable a user-selectable mission smart-rejoin behavior or a mission-route-aware Return mode.
-Those behaviors are expected to be documented separately by Navigator changes that consume this planner and cache.
+This page documents developer infrastructure used by Mission smart route rejoin.
+The route-aware Return mode uses the same planner concepts but is documented separately when enabled.
 :::
 
 ## Purpose
@@ -20,6 +19,7 @@ The route-planning infrastructure separates that work into:
 
 - `MissionRouteCache`: a Navigator-owned, dataman-backed provider for mission geometry, the mission landing item, and safe points.
 - `MissionRoutePlanner`: a stateless geometry and scoring engine that reads data through a provider interface.
+- Mission-mode route-join execution: a temporary branch-in waypoint and optional post-join VTOL transition before normal mission execution resumes.
 - `DatamanCache::updateCachedItem()`: a helper that mirrors an already-written authoritative mission item into another cache instance without issuing a second dataman request.
 
 This split lets future Navigator modes share the same route geometry without duplicating dataman state machines or making route scans depend on SD-card latency.
@@ -30,6 +30,8 @@ This split lets future Navigator modes share the same route geometry without dup
 | --- | --- |
 | `src/modules/navigator/mission_route_planner.h/cpp` | Projects the vehicle and safe points onto mission segments, evaluates route paths, and returns `JoinPlan` or `Plan` data to a caller. |
 | `src/modules/navigator/mission_route_cache.h/cpp` | Maintains full-mission, mission-land, and safe-point caches and implements `MissionRoutePlanner::Provider`. |
+| `src/modules/navigator/mission.h/cpp` | Gates Mission smart rejoin with `MIS_ROUTE_JOIN`, builds `JoinPlan`, and arms the branch-in pipeline on activation. |
+| `src/modules/navigator/mission_base.h/cpp` | Executes shared branch-in work items and optional post-join VTOL transitions. |
 | `src/modules/navigator/navigator.h` | Owns the shared `MissionRouteCache` instance for Navigator. |
 | `src/lib/dataman_client/DatamanClient.hpp/cpp` | Adds `DatamanCache::updateCachedItem()` so one cache can be kept coherent after another path has already written the value. |
 | `src/modules/navigator/Kconfig` | Defines `CONFIG_RTL_MISSION_CACHE_SIZE`, the board-level RAM reservation for the full mission-route cache. |
@@ -98,7 +100,8 @@ The vehicle projection has three steps:
    A zero-length segment uses the endpoint altitude.
 
 The result is a `ProjectionContext` and `JoinContext`.
-The planner leaves execution details, such as when to fly to that branch-in point or whether to skip the join altitude, to the caller.
+Mission mode uses this data when `MIS_ROUTE_JOIN=1`: it updates the active mission index to the selected route target, publishes a virtual branch-in waypoint, and then resumes the real mission item stream.
+If the branch-in segment requires a VTOL state change, `MissionBase` publishes a post-join transition work item before returning to normal mission execution.
 
 ## Safe-Point Scoring
 
@@ -179,21 +182,22 @@ The helper does not issue a new dataman request, and it does not patch entries t
 
 ## Tests
 
-The infrastructure has focused coverage in Navigator tests:
+The infrastructure and Mission smart-rejoin behavior have focused coverage in Navigator tests:
 
 - `functional-test_mission_route_cache` covers mission-cache loading, too-large mission rejection, mission-land caching, safe-point retry behavior, safe-point identity changes, and stale-data protection during reload.
 - `functional-test_mission_route_planner_candidates` covers route projection candidate handling, corner behavior, candidate ordering, and invalid input rejection close to the planner.
-- `functional-test_mission_base` remains the shared baseline for existing mission behavior while this infrastructure is present but not yet used by Mission or RTL execution paths.
+- `functional-test_mission_route_planner_join` covers Mission resume join plans, including `DO_JUMP` loop exits and near-landing altitude shortcuts.
+- `functional-test_mission_base` remains the shared baseline for mission traversal behavior and route-cache DO_JUMP coherency.
+- `functional-test_navigator_smart_mission_join` covers Mission activation wiring, branch-in arming, and post-join VTOL transition handoff.
 
-Future behavior changes that consume this infrastructure should add their own execution and integration coverage for the specific Mission or RTL modes they enable.
+Future Return-mode behavior that consumes this infrastructure should add its own execution and integration coverage.
 
 ## Deferred Behavior
 
-This infrastructure intentionally does not document or enable:
+This Mission smart-rejoin change intentionally does not document or enable:
 
-- A user-facing smart mission rejoin parameter.
 - A new Return mode type that follows the mission path.
 - Route-following, branch-off, final approach, or landing executor stages.
 - User setup instructions for route-aware RTL behavior.
 
-Those topics belong with the behavior changes that wire the planner into Mission and RTL execution.
+Those topics belong with the later Return-mode behavior changes.
