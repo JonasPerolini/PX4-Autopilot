@@ -33,8 +33,11 @@
 /**
  * @file mission_route_cache.cpp
  *
- * Shared dataman-backed cache for mission geometry, mission-land items, and
- * safe points consumed by MissionRoutePlanner.
+ * Dataman-backed Provider for mission-route planning. It preloads the whole
+ * uploaded mission, the published mission land item, and the safe-point so
+ * the planner can scan route geometry without blocking Navigator on dataman or
+ * SD-card reads. Normal mission execution can keep using smaller sliding caches;
+ * use this cache when a caller needs access to the full route.
  *
  * @author Jonas Perolini <jonspero@me.com>
  */
@@ -94,8 +97,8 @@ bool MissionRouteCache::queueMissionCacheLoads(const mission_s &mission)
 
 hrt_abstime MissionRouteCache::nextRetryBackoff(uint8_t retry_count)
 {
-	const uint8_t backoff_shift = (retry_count < MAX_RETRY_BACKOFF_SHIFT) ? retry_count : MAX_RETRY_BACKOFF_SHIFT;
-	return CACHE_RETRY_BACKOFF << backoff_shift;
+	const uint8_t backoff_shift = (retry_count < kMaxRetryBackoffShift) ? retry_count : kMaxRetryBackoffShift;
+	return kCacheRetryBackoff << backoff_shift;
 }
 
 bool MissionRouteCache::missionCacheFullyLoaded(const mission_s &mission) const
@@ -153,7 +156,7 @@ void MissionRouteCache::resetSafePointCacheState(bool clear_source_identity)
 
 bool MissionRouteCache::missionExceedsCacheLimit(const mission_s &mission) const
 {
-	return mission.count > MAX_ROUTE_MISSION_CACHE_SIZE;
+	return mission.count > kMaxRouteMissionCacheSize;
 }
 
 bool MissionRouteCache::isReady(const mission_s &mission) const
@@ -174,7 +177,7 @@ bool MissionRouteCache::loadMissionItem(int index, mission_item_s &mission_item)
 	       && index >= 0 && index < _mission.count
 	       && _dataman_cache_mission.loadWait(static_cast<dm_item_t>(_mission.dataman_id), index,
 			       reinterpret_cast<uint8_t *>(&mission_item), sizeof(mission_item),
-			       CACHE_ONLY_LOAD_WAIT);
+			       kCacheOnlyLoadWait);
 }
 
 int MissionRouteCache::safePointCount() const
@@ -188,7 +191,7 @@ bool MissionRouteCache::loadSafePointItem(int index, mission_item_s &safe_point_
 	       && index >= 0 && index < _safe_point.stats.num_items
 	       && _dataman_cache_safepoint.loadWait(static_cast<dm_item_t>(_safe_point.stats.dataman_id), index,
 			       reinterpret_cast<uint8_t *>(&safe_point_item), sizeof(safe_point_item),
-			       CACHE_ONLY_LOAD_WAIT);
+			       kCacheOnlyLoadWait);
 }
 
 bool MissionRouteCache::getMissionLandItem(int32_t &index, mission_item_s &land_item) const
@@ -200,7 +203,7 @@ bool MissionRouteCache::getMissionLandItem(int32_t &index, mission_item_s &land_
 	index = _mission_land.index;
 	return _dataman_cache_land_item.loadWait(static_cast<dm_item_t>(_mission_land.dataman_id), index,
 			reinterpret_cast<uint8_t *>(&land_item), sizeof(land_item),
-			CACHE_ONLY_LOAD_WAIT);
+			kCacheOnlyLoadWait);
 }
 
 bool MissionRouteCache::loadMissionItem(const mission_s &mission, int32_t index, mission_item_s &mission_item) const
@@ -280,10 +283,9 @@ void MissionRouteCache::updateMissionCache(const mission_s &mission)
 			return;
 		}
 
-		// Loading it completed, clear pending flag
 		state.validation_pending = false;
 
-		// O(N) check on every item cached into the RAM
+		// Validate that every queued async read made it into the RAM cache.
 		if (missionCacheFullyLoaded(mission)) {
 			state.ready = true;
 			state.retry_at = 0;
@@ -298,8 +300,6 @@ void MissionRouteCache::updateMissionCache(const mission_s &mission)
 				++state.retry_count;
 			}
 		}
-
-		// Error handling
 
 	} else if (state.retry_at != 0 && now >= state.retry_at) {
 		state.validation_pending = queueMissionCacheLoads(mission);

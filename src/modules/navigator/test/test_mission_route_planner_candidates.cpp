@@ -143,7 +143,7 @@ protected:
 
 	void fillBufferToCapacity(MissionRoutePlanner::CandidateBuffer &buffer)
 	{
-		for (int32_t i = 0; i < MissionRoutePlanner::MAX_SEGMENT_CANDIDATES; ++i) {
+		for (int32_t i = 0; i < MissionRoutePlanner::kMaxSegmentCandidates; ++i) {
 			planner.insertCandidateSortedForTest(buffer, makeCandidate(i + 1, static_cast<float>(i + 1)));
 		}
 	}
@@ -237,11 +237,11 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, InsertCandidateSortedFullBufferRe
 
 	// WHEN: A candidate worse than every buffered entry is inserted.
 	planner.insertCandidateSortedForTest(buffer,
-					     makeCandidate(99, static_cast<float>(MissionRoutePlanner::MAX_SEGMENT_CANDIDATES) + 100.f));
+					     makeCandidate(99, static_cast<float>(MissionRoutePlanner::kMaxSegmentCandidates) + 100.f));
 
 	// THEN: The buffer remains unchanged.
-	ASSERT_EQ(buffer.count, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES);
-	expectCandidateIds(buffer, expectedSequentialIds(1, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES));
+	ASSERT_EQ(buffer.count, MissionRoutePlanner::kMaxSegmentCandidates);
+	expectCandidateIds(buffer, expectedSequentialIds(1, MissionRoutePlanner::kMaxSegmentCandidates));
 }
 
 // WHY: The fixed-size candidate buffer must keep the closest projections and drop the farthest.
@@ -256,9 +256,9 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, InsertCandidateSortedFullBufferDr
 	planner.insertCandidateSortedForTest(buffer, makeCandidate(0, 0.5f));
 
 	// THEN: The farthest candidate is dropped and the remaining three stay sorted.
-	ASSERT_EQ(buffer.count, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES);
+	ASSERT_EQ(buffer.count, MissionRoutePlanner::kMaxSegmentCandidates);
 	std::vector<int32_t> expected_ids{0};
-	const std::vector<int32_t> retained_ids = expectedSequentialIds(1, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES - 1);
+	const std::vector<int32_t> retained_ids = expectedSequentialIds(1, MissionRoutePlanner::kMaxSegmentCandidates - 1);
 	expected_ids.insert(expected_ids.end(), retained_ids.begin(), retained_ids.end());
 	expectCandidateIds(buffer, expected_ids);
 }
@@ -294,12 +294,12 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, InsertCandidateSortedFullBufferIn
 
 	// WHEN: A mid-ranked candidate is inserted.
 	planner.insertCandidateSortedForTest(buffer,
-					     makeCandidate(25, static_cast<float>(MissionRoutePlanner::MAX_SEGMENT_CANDIDATES) - 0.5f));
+					     makeCandidate(25, static_cast<float>(MissionRoutePlanner::kMaxSegmentCandidates) - 0.5f));
 
 	// THEN: The insertion lands in the middle and the previous worst candidate is dropped.
-	ASSERT_EQ(buffer.count, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES);
+	ASSERT_EQ(buffer.count, MissionRoutePlanner::kMaxSegmentCandidates);
 	std::vector<int32_t> expected_ids =
-		expectedSequentialIds(1, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES - 1);
+		expectedSequentialIds(1, MissionRoutePlanner::kMaxSegmentCandidates - 1);
 	expected_ids.push_back(25);
 	expectCandidateIds(buffer, expected_ids);
 }
@@ -312,7 +312,7 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, InsertCandidateSortedOverfullCoun
 	MissionRoutePlanner::CandidateBuffer buffer{};
 	buffer.count = 20;
 
-	for (int32_t i = 0; i < MissionRoutePlanner::MAX_SEGMENT_CANDIDATES; ++i) {
+	for (int32_t i = 0; i < MissionRoutePlanner::kMaxSegmentCandidates; ++i) {
 		buffer.candidates[i] = makeCandidate(i + 1, static_cast<float>(i + 1));
 	}
 
@@ -320,9 +320,9 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, InsertCandidateSortedOverfullCoun
 	planner.insertCandidateSortedForTest(buffer, makeCandidate(0, 0.5f));
 
 	// THEN: The helper clamps to the real capacity and keeps the best candidates.
-	ASSERT_EQ(buffer.count, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES);
+	ASSERT_EQ(buffer.count, MissionRoutePlanner::kMaxSegmentCandidates);
 	std::vector<int32_t> expected_ids{0};
-	const std::vector<int32_t> retained_ids = expectedSequentialIds(1, MissionRoutePlanner::MAX_SEGMENT_CANDIDATES - 1);
+	const std::vector<int32_t> retained_ids = expectedSequentialIds(1, MissionRoutePlanner::kMaxSegmentCandidates - 1);
 	expected_ids.insert(expected_ids.end(), retained_ids.begin(), retained_ids.end());
 	expectCandidateIds(buffer, expected_ids);
 }
@@ -389,7 +389,7 @@ TEST_F(MissionRoutePlannerCandidateBufferTest, PruneProjectionCandidatesOverfull
 	MissionRoutePlanner::CandidateBuffer buffer{};
 	buffer.count = 20;
 
-	for (int32_t i = 0; i < MissionRoutePlanner::MAX_SEGMENT_CANDIDATES; ++i) {
+	for (int32_t i = 0; i < MissionRoutePlanner::kMaxSegmentCandidates; ++i) {
 		buffer.candidates[i] = makeCandidate(i + 1, static_cast<float>(i + 1));
 	}
 

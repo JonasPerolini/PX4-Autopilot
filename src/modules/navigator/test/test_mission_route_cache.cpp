@@ -200,7 +200,7 @@ TEST_F(MissionRouteCacheTest, MissionCacheSchedulesRetryWhenCacheIsIncomplete)
 TEST_F(MissionRouteCacheTest, MissionCacheRejectsTooLargeMission)
 {
 	// GIVEN: A mission that exceeds the configured mission cache size.
-	const mission_s mission = makeMission(19, static_cast<uint16_t>(MissionRouteCache::MAX_ROUTE_MISSION_CACHE_SIZE + 1));
+	const mission_s mission = makeMission(19, static_cast<uint16_t>(MissionRouteCache::kMaxRouteMissionCacheSize + 1));
 
 	// WHEN: The cache processes the new mission and the private queue helper is asked to queue it.
 	_cache.update(mission);

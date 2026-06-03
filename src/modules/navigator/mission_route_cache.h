@@ -33,7 +33,9 @@
 /**
  * @file mission_route_cache.h
  *
- * Shared full-mission, mission-land, and safe-point cache used by route planning.
+ * Navigator-owned cache used by mission-route planners. It keeps full mission
+ * geometry, the published mission land item, and safe points available through
+ * the planner Provider interface.
  *
  * @author Jonas Perolini <jonspero@me.com>
  */
@@ -50,12 +52,12 @@
 class MissionRouteCache : public MissionRoutePlanner::Provider
 {
 public:
-	static constexpr hrt_abstime CACHE_ONLY_LOAD_WAIT{0}; // Planner/provider reads must not block on cache misses.
-	static constexpr hrt_abstime CACHE_RETRY_BACKOFF{500000}; // 500 ms
-	static constexpr uint8_t MAX_RETRY_BACKOFF_SHIFT{3}; // Retry 3+: 500ms << 3 = 500ms * 2^3 = 4000 ms (4 sec) wait.
-	static constexpr int32_t MAX_ROUTE_MISSION_CACHE_SIZE{CONFIG_RTL_MISSION_CACHE_SIZE};
-	static constexpr uint32_t INITIAL_SAFEPOINT_CACHE_SIZE{0};
-	static constexpr uint32_t INITIAL_LAND_ITEM_CACHE_SIZE{1};
+	static constexpr hrt_abstime kCacheOnlyLoadWait{0}; // Planner/provider reads must not block on cache misses.
+	static constexpr hrt_abstime kCacheRetryBackoff{500000}; // 500 ms
+	static constexpr uint8_t kMaxRetryBackoffShift{3}; // Retry 3+: 500ms << 3 = 4000 ms.
+	static constexpr int32_t kMaxRouteMissionCacheSize{CONFIG_RTL_MISSION_CACHE_SIZE};
+	static constexpr uint32_t kInitialSafePointCacheSize{0};
+	static constexpr uint32_t kInitialLandItemCacheSize{1};
 
 	MissionRouteCache() = default;
 	~MissionRouteCache() = default;
@@ -164,9 +166,9 @@ private:
 
 	// MissionRouteCache is used from Navigator's single-threaded work-loop. The mutable caches
 	// allow const planner/provider methods to read preloaded RAM entries without blocking.
-	mutable DatamanCache _dataman_cache_mission{"navigator_dm_cache_route_mission", MAX_ROUTE_MISSION_CACHE_SIZE};
-	mutable DatamanCache _dataman_cache_safepoint{"navigator_dm_cache_route_safepoint", INITIAL_SAFEPOINT_CACHE_SIZE};
-	mutable DatamanCache _dataman_cache_land_item{"navigator_dm_cache_route_land", INITIAL_LAND_ITEM_CACHE_SIZE};
+	mutable DatamanCache _dataman_cache_mission{"navigator_dm_cache_route_mission", kMaxRouteMissionCacheSize};
+	mutable DatamanCache _dataman_cache_safepoint{"navigator_dm_cache_route_safepoint", kInitialSafePointCacheSize};
+	mutable DatamanCache _dataman_cache_land_item{"navigator_dm_cache_route_land", kInitialLandItemCacheSize};
 	DatamanClient &_dataman_client_safepoint = _dataman_cache_safepoint.client();
 
 	MissionCacheState _mission{};

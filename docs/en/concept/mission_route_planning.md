@@ -68,6 +68,64 @@ The current infrastructure exposes these planning products:
 The planner computes this data only.
 It does not publish setpoints, change mission indices, or activate flight-mode behavior.
 
+## Projection Candidate Search
+
+Vehicle projection and safe-point scoring use the same route scan.
+The planner walks the cached mission once, builds each segment from consecutive position-bearing mission items, and evaluates that segment against a batch of reference positions.
+For each reference position it:
+
+- Computes the perpendicular projection onto the segment, clamped to the segment endpoints.
+- Keeps interior projections and route-corner projections that are local minima.
+- Tracks the closest crosstrack distance and accepts other local minima only within the caller-supplied extra search margin.
+- Stores the best candidates in a fixed-size, crosstrack-sorted buffer of `MissionRoutePlanner::kMaxSegmentCandidates` entries.
+
+The scan records along-route distance as it goes, so later scoring can compare a vehicle projection, safe-point projection, mission takeoff, mission land, or `DO_JUMP` loop edge in the same distance frame.
+
+## Vehicle Projection
+
+`collectVehicleProjection()` projects the current vehicle position onto the mission route and chooses the branch-in point that best preserves mission continuity.
+Callers pass the active mission index, flight direction, velocity, optional active loop segment, and `vehicle_projection_search_dist` through `MissionRoutePlanner::Config`.
+
+The vehicle projection has three steps:
+
+1. Candidate collection: find up to `kMaxSegmentCandidates` local-minimum projections on the route.
+   A candidate stays eligible when its crosstrack distance is no more than the closest candidate plus `vehicle_projection_search_dist`.
+2. Branch-in selection: prefer a candidate on the segment that contains the active mission index.
+   If the caller supplied an active `DO_JUMP` loop segment, that exact loop edge has priority.
+   If there is no priority match, choose the candidate with the lowest `crosstrack distance + distance back to the last-flown segment` score.
+3. Altitude assignment: interpolate altitude between the segment endpoints.
+   A land segment uses the previous route altitude, because the land item altitude is not a good branch-in target.
+   A zero-length segment uses the endpoint altitude.
+
+The result is a `ProjectionContext` and `JoinContext`.
+The planner leaves execution details, such as when to fly to that branch-in point or whether to skip the join altitude, to the caller.
+
+## Safe-Point Scoring
+
+`selectSafePoint()` uses the same projection scan with each safe point as a reference position.
+The caller supplies `safe_point_projection_search_dist`, `u_turn_penalty_m`, vehicle type flags, and whether VTOL approach eligibility is required.
+
+Safe points are filtered before scoring:
+
+- The provider must expose a valid `NAV_CMD_RALLY_POINT` item.
+- The frame must be global or global-relative, with a valid home altitude when relative altitude is used.
+- Invalid coordinates are skipped.
+- If `require_vtol_approach` is set, the safe point must own at least one valid `NAV_CMD_LOITER_TO_ALT` item in the contiguous block after the rally point and before the next rally point.
+
+Each remaining safe point gets up to `kMaxSegmentCandidates` branch-off candidates.
+For every candidate, the planner computes a full route path from the vehicle projection to the branch-off projection and adds the final straight branch-off leg from the route to the safe point.
+Fixed-wing and VTOL-in-fixed-wing callers can add `u_turn_penalty_m` when the selected route direction requires an immediate U-turn.
+The safe point with the lowest total cost wins.
+
+Route-to-goal callers can still apply execution shortcuts after scoring, such as going direct when the vehicle is already close to the selected safe point or close to the selected branch-off leg.
+Those shortcuts do not change which safe point wins the route-based cost comparison.
+
+## Safe-Point Batch Limit
+
+The planner evaluates a bounded safe-point batch in one pass.
+`MissionRoutePlanner::kMaxSafePointBatch` is the maximum number of eligible safe points considered in a single planning pass; extra eligible entries are skipped after that limit.
+The current limit is also kept within the `uint8_t` range used by `RtlStatus.safe_point_index`.
+
 ## Route Cache
 
 `MissionRouteCache` is the production provider for the planner.

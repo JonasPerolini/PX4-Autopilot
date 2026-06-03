@@ -34,9 +34,11 @@
 /**
  * @file mission_route_planner.cpp
  *
- * Route planner infrastructure for mission-route projection and safe-point selection.
- * Projects the vehicle and safe points onto uploaded mission geometry, then selects
- * a route goal with the lowest total cost.
+ * Route geometry and scoring code for Navigator callers that need to reason about
+ * the whole uploaded mission. The planner reads mission and safe-point data through
+ * a Provider, projects positions onto route segments, and returns the selected
+ * join/goal data. It does not publish setpoints, own dataman state, or decide when
+ * a flight mode should use the plan.
  *
  * @author Jonas Perolini <jonspero@me.com>
  */
@@ -52,9 +54,8 @@
 using namespace math;
 
 /**
- * Shared static SafePointBatch to keep the ~25 KB struct off the stack on
- * constrained targets.  Both call-sites (collectVehicleProjection, selectSafePoint)
- * reset batch.count before reuse and are never called concurrently
+ * Shared SafePointBatch keeps the fixed-size projection buffers off the stack.
+ * Navigator calls the planner from one work loop, and each caller resets count before use.
  */
 static MissionRoutePlanner::SafePointBatch s_safe_point_batch{};
 
@@ -416,7 +417,7 @@ void MissionRoutePlanner::loadSafePointBatch(const Config &config, SafePointBatc
 	const int safe_point_item_count = _provider.safePointCount();
 	int safe_point_index = 0;
 
-	for (; safe_point_index < safe_point_item_count && batch.count < MAX_SAFE_POINT_BATCH; ++safe_point_index) {
+	for (; safe_point_index < safe_point_item_count && batch.count < kMaxSafePointBatch; ++safe_point_index) {
 		mission_item_s safe_point_item{};
 
 		if (!_provider.loadSafePointItem(safe_point_index, safe_point_item)) {
@@ -443,9 +444,9 @@ void MissionRoutePlanner::loadSafePointBatch(const Config &config, SafePointBatc
 		batch.count++;
 	}
 
-	if (batch.count == MAX_SAFE_POINT_BATCH && safe_point_index < safe_point_item_count) {
+	if (batch.count == kMaxSafePointBatch && safe_point_index < safe_point_item_count) {
 		PX4_WARN("RTL safe point batch full at %u items, skipping remaining entries",
-			 static_cast<unsigned>(MAX_SAFE_POINT_BATCH));
+			 static_cast<unsigned>(kMaxSafePointBatch));
 	}
 }
 
@@ -569,30 +570,30 @@ bool MissionRoutePlanner::validateCandidate(const SegmentCandidate &candidate) c
 void MissionRoutePlanner::insertCandidateSorted(CandidateBuffer &candidate_buffer, const SegmentCandidate &candidate) const
 {
 	uint8_t insert_index = 0;
-	const uint8_t buffer_size = min(candidate_buffer.count, MAX_SEGMENT_CANDIDATES);
+	const uint8_t buffer_size = min(candidate_buffer.count, kMaxSegmentCandidates);
 
 	while (insert_index < buffer_size
 	       && candidate_buffer.candidates[insert_index].dist.xtrack <= candidate.dist.xtrack) {
 		++insert_index;
 	}
 
-	if (insert_index >= MAX_SEGMENT_CANDIDATES) {
+	if (insert_index >= kMaxSegmentCandidates) {
 		return;
 	}
 
-	int16_t shift_dest = (buffer_size == MAX_SEGMENT_CANDIDATES) ? buffer_size - 1 : buffer_size;
+	int16_t shift_dest = (buffer_size == kMaxSegmentCandidates) ? buffer_size - 1 : buffer_size;
 
 	for (int16_t j = shift_dest; j > insert_index; --j) {
 		candidate_buffer.candidates[j] = candidate_buffer.candidates[j - 1];
 	}
 
 	candidate_buffer.candidates[insert_index] = candidate;
-	candidate_buffer.count = min(static_cast<uint8_t>(buffer_size + 1), MAX_SEGMENT_CANDIDATES);
+	candidate_buffer.count = min(static_cast<uint8_t>(buffer_size + 1), kMaxSegmentCandidates);
 }
 
 void MissionRoutePlanner::pruneProjectionCandidates(CandidateBuffer &candidate_buffer, float xtrack_limit) const
 {
-	const uint8_t buffer_size = min(candidate_buffer.count, MAX_SEGMENT_CANDIDATES);
+	const uint8_t buffer_size = min(candidate_buffer.count, kMaxSegmentCandidates);
 
 	if (buffer_size == 0) {
 		return;
@@ -701,15 +702,15 @@ void MissionRoutePlanner::processCandidateForSegment(const Position &reference_p
 		proj_on_end = true;
 
 	} else {
-		// Orthogonal projection onto the segment
-		// segment_vector (A→B) is pre-computed by the caller once per segment.
-		matrix::Vector2f reference_vector; // Vector A→P (segment start to reference point)
+		// Orthogonal projection onto the segment.
+		// segment_vector (A to B) is pre-computed by the caller once per segment.
+		matrix::Vector2f reference_vector; // Vector A to P (segment start to reference point)
 
 		get_vector_to_next_waypoint(segment_positions.start.lat, segment_positions.start.lon,
 					    reference_position.lat, reference_position.lon,
 					    &reference_vector(0), &reference_vector(1));
 
-		// t = (A→P · A→B) / |A→B|² unclamped scalar projection parameter.
+		// t = dot(A to P, A to B) / |A to B|^2, unclamped.
 		const float path_len_sq = segment_vector.norm_squared();
 		const float t = (path_len_sq > FLT_EPSILON) ? (reference_vector.dot(segment_vector) / path_len_sq) : 0.f;
 
@@ -797,7 +798,7 @@ bool MissionRoutePlanner::findProjectionCandidatesBatch(int32_t mission_index, f
 		return false;
 	}
 
-	if (batch.count == 0 || batch.count > MAX_SAFE_POINT_BATCH) {
+	if (batch.count == 0 || batch.count > kMaxSafePointBatch) {
 		return false;
 	}
 
@@ -1423,13 +1424,11 @@ bool MissionRoutePlanner::shouldSkipRouteToGoal(const Position &vehicle_position
 		return false;
 	}
 
-	// No safe point found, use same condition as smart mission join to skip branch-in alt
 	if (!selection.safe_point_found) {
 		return shouldSkipJoinAltitudeRequirement(selection.path);
 	}
 
-	// If a safe point was found, do not skip based on nav command so a rally point far from the
-	// takeoff (or land) but projected onto the takeoff (or land) does not result in an immediate land.
+	// Safe-point goals only skip when the selected destination or branch-off leg is already close.
 	return closeToSafePointDirect(vehicle_position, selection.safe_point_position, config)
 	       || closeToBranchOffSegment(vehicle_position, selection, config.parameters.acceptance_radius);
 }

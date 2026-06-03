@@ -34,9 +34,9 @@
 /**
  * @file mission_route_planner.h
  *
- * Route planner infrastructure for mission-route projection and safe-point selection.
- * Projects the vehicle and safe points onto uploaded mission geometry, then selects
- * a route goal with the lowest total cost.
+ * Mission-route planner interface for Navigator features that need the uploaded
+ * mission as route geometry. The planner projects positions onto the mission path,
+ * ranks candidate paths, and returns plain data for the caller to execute.
  *
  * @author Jonas Perolini <jonspero@me.com>
  */
@@ -64,13 +64,13 @@ public:
 	static constexpr double kNullIslandThresholdDeg{1e-7};
 	static constexpr double kCornerLatLonTolDeg{1e-5};
 	static constexpr float kLandApproachAssociationDistanceM{10.f};
-	static constexpr uint8_t MAX_SEGMENT_CANDIDATES{3};
+	static constexpr uint8_t kMaxSegmentCandidates{3};
 	/**
 	 * Maximum eligible rally points evaluated per planning pass.
 	 * The planner uses a fixed-size batch buffer, so extra eligible safe points are skipped after this limit.
 	 * RtlStatus.msg also uses uint8_t for safe_point_index, so this must stay <= 255.
 	 */
-	static constexpr uint8_t MAX_SAFE_POINT_BATCH{64};
+	static constexpr uint8_t kMaxSafePointBatch{64};
 
 	enum class GoalType : uint8_t {
 		None = 0,
@@ -197,7 +197,7 @@ public:
 
 	/** @brief Fixed-size xtrack-sorted buffer of the best projection candidates for one point. */
 	struct CandidateBuffer {
-		SegmentCandidate candidates[MAX_SEGMENT_CANDIDATES] {};
+		SegmentCandidate candidates[kMaxSegmentCandidates] {};
 		uint8_t count{0};
 	};
 
@@ -364,7 +364,7 @@ public:
 	/** @brief Fixed-size batch of safe points evaluated during a single planner pass. */
 	struct SafePointBatch {
 		uint8_t count{0};
-		SafePointBatchItem items[MAX_SAFE_POINT_BATCH] {};
+		SafePointBatchItem items[kMaxSafePointBatch] {};
 	};
 
 	enum class FailureReason : uint8_t {
@@ -381,12 +381,10 @@ public:
 	};
 
 	/**
-	 * @brief Abstraction for mission and safe-point data access.
+	 * @brief Data source used by the planner.
 	 *
-	 * Production code uses MissionRouteCache as the provider and dataman abstraction
-	 * for mission geometry, safe points, and mission-land items. Unit tests supply a
-	 * VectorProvider backed by std::vector, which keeps the planner testable without
-	 * any dataman or uORB dependencies.
+	 * Navigator passes MissionRouteCache here. Tests can pass an in-memory provider,
+	 * which keeps the route geometry code independent from dataman and uORB.
 	 */
 	class Provider
 	{
@@ -524,7 +522,7 @@ private:
 
 	/** @brief Batch-wide scan state, including per-item candidate search state and scan statistics. */
 	struct BatchSearchState {
-		CandidateSearchState candidate_states[MAX_SAFE_POINT_BATCH] {};
+		CandidateSearchState candidate_states[kMaxSafePointBatch] {};
 		uint32_t segments_processed{0};
 		uint32_t local_min_found{0};
 		uint32_t valid_candidate_found{0};
@@ -571,7 +569,7 @@ private:
 	/**
 	 * @brief Scan the mission once and evaluate a batch of reference points against every position segment.
 	 *
-	 * The batch contains either a single vehicle position or up to MAX_SAFE_POINT_BATCH safe points. During the
+	 * The batch contains either a single vehicle position or up to kMaxSafePointBatch safe points. During the
 	 * scan the function builds each geometric segment, applies the local-minimum projection filter for every batch
 	 * item, keeps the closest projection candidates inside the caller's cross-track window, and reports route-level
 	 * metadata such as total route length and the along-track bounds of the caller's current segment in outputs.
@@ -620,33 +618,27 @@ private:
 	float accumulateRouteDistance(int32_t from_index, int32_t to_index, float home_altitude_amsl) const;
 	/** @brief Build the loop-jump context used when the vehicle is projected onto a DO_JUMP segment. */
 	LoopContext buildLoopContext(const SegmentCandidate &vehicle_projection, float home_altitude_amsl) const;
-	/** @brief Compute the shorted path along the mission route, excluding any off-route branch-off leg. */
+	/** @brief Compute the shortest path along the mission route, excluding any off-route branch-off leg. */
 	Path findShortestPathAlongRoute(float goal_dist_along, const ProjectionContext &projection_context,
 					const Config &config, PathDirectionMode direction_mode = PathDirectionMode::Auto,
 					bool goal_is_on_jump_segment = false) const;
 	/** @brief Return true when the vehicle is already close enough to the selected safe point to skip route following. */
 	bool closeToSafePointDirect(const Position &vehicle_position, const Position &safe_point_position,
 				    const Config &config) const;
-	/** @brief Apply the route-skip shortcuts to the selected goal.
+	/**
+	 * @brief Return true when a selected goal can bypass route following.
 	 *
-	 * If no safe point was found: use the same criteria as shouldSkipJoinAltitudeRequirement:
-	 *     skip the route if the vehicle targets the mission endpoints: landing in nominal direction
-	 *     or takeoff when in reverse direction.
-	 *
-	 * If a safe point was found:
-	 *    do not skip based on nav command so a rally point far from the
-	 *    takeoff (or land) but projected onto the takeoff (or land) does not result in an immediate land.
-	 *    Instead, skip if we are within the acc rad of the safe point or if we are close to the
-	 *    branch-off - safe point leg.
-	 *
-	*/
+	 * Mission endpoint fallbacks reuse the join-altitude shortcut. Safe-point goals only skip
+	 * when the vehicle is already close to the selected safe point or branch-off leg.
+	 */
 	bool shouldSkipRouteToGoal(const Position &vehicle_position, const Selection &selection,
 				   const Config &config) const;
-	/** @brief Return true when JOIN_ROUTE should ignore the planned route altitude for this target.
+	/**
+	 * @brief Return true when JOIN_ROUTE should ignore the planned route altitude for this target.
 	 *
-	 * skip the branch-in alt if the vehicle targets the mission endpoints: landing in nominal direction
-	 * or takeoff when in reverse direction.
-	*/
+	 * This applies when the first route target is the mission land item in nominal direction,
+	 * or the takeoff item in reverse direction.
+	 */
 	bool shouldSkipJoinAltitudeRequirement(const Path &path) const;
 	/** @brief Force or infer the direction used to reach a goal from the projected vehicle location. */
 	bool mustFlyReverse(float goal_dist_along, float projection_dist_along,
