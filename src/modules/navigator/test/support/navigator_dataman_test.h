@@ -32,72 +32,63 @@
  ****************************************************************************/
 
 /**
- * @file vector_mission_item_store.h
+ * @file navigator_dataman_test.h
+ *
+ * Shared dataman/work-queue lifecycle for navigator unit tests.
  *
  * @author Jonas Perolini <jonspero@me.com>
- *
  */
 
 #pragma once
 
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <initializer_list>
-#include <vector>
+#include <gtest/gtest.h>
 
-#include "navigation.h"
+#include <parameters/param.h>
+#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
 
-namespace navigator_test
-{
+extern "C" int dataman_main(int argc, char *argv[]);
 
-class VectorMissionItemStore
+class NavigatorDatamanRuntime
 {
 public:
-	void setItems(const std::vector<mission_item_s> &items)
+	NavigatorDatamanRuntime()
 	{
-		_items = items;
-		clearLoadFailures();
+		param_control_autosave(false);
+		px4::WorkQueueManagerStart();
+
+		char name[] = "dataman";
+		char start[] = "start";
+		char ram[] = "-r";
+		char *argv[] = {name, start, ram};
+		dataman_main(3, argv);
 	}
 
-	void setLoadFailureIndices(std::initializer_list<int32_t> indices)
+	~NavigatorDatamanRuntime()
 	{
-		_load_failure_indices.assign(indices.begin(), indices.end());
+		param_control_autosave(true);
+
+		char name[] = "dataman";
+		char stop[] = "stop";
+		char *argv[] = {name, stop};
+		dataman_main(2, argv);
+
+		px4::WorkQueueManagerStop();
 	}
-
-	void setLoadFailureIndices(const std::vector<int32_t> &indices)
-	{
-		_load_failure_indices = indices;
-	}
-
-	void clearLoadFailures()
-	{
-		_load_failure_indices.clear();
-	}
-
-	bool loadItem(int32_t index, mission_item_s &mission_item) const
-	{
-		if (std::find(_load_failure_indices.begin(), _load_failure_indices.end(), index)
-		    != _load_failure_indices.end()) {
-			return false;
-		}
-
-		if (index < 0 || index >= static_cast<int32_t>(_items.size())) {
-			return false;
-		}
-
-		mission_item = _items[static_cast<std::size_t>(index)];
-		return true;
-	}
-
-	std::size_t itemCount() const
-	{
-		return _items.size();
-	}
-
-private:
-	std::vector<mission_item_s> _items;
-	std::vector<int32_t> _load_failure_indices;
 };
 
-} // namespace navigator_test
+static inline NavigatorDatamanRuntime &navigatorDatamanRuntime()
+{
+	static NavigatorDatamanRuntime runtime{};
+	return runtime;
+}
+
+class NavigatorDatamanTestBase : public ::testing::Test
+{
+protected:
+	static void SetUpTestSuite()
+	{
+		(void)navigatorDatamanRuntime();
+	}
+
+	static void TearDownTestSuite() {}
+};

@@ -54,9 +54,8 @@
 
 #include "navigator.h"
 #include "rtl.h"
+#include "support/navigator_dataman_test.h"
 #include "support/vector_mission_item_store.h"
-
-extern "C" int dataman_main(int argc, char *argv[]);
 
 namespace
 {
@@ -65,39 +64,6 @@ constexpr double kBaseLat = 47.397742;
 constexpr double kBaseLon = 8.545594;
 constexpr float kAlt = 500.f;
 constexpr float kApproachRadius = 50.f;
-
-/**
- * @brief Starts dataman for this file.
- */
-class TestDatamanRuntime
-{
-public:
-	TestDatamanRuntime()
-	{
-		char name[] = "dataman";
-		char start[] = "start";
-		char ram[] = "-r";
-		char *argv[] = {name, start, ram};
-		dataman_main(3, argv);
-	}
-
-	~TestDatamanRuntime()
-	{
-		char name[] = "dataman";
-		char stop[] = "stop";
-		char *argv[] = {name, stop};
-		dataman_main(2, argv);
-	}
-};
-
-/**
- * @brief Returns the shared dataman runtime.
- */
-TestDatamanRuntime &testDatamanRuntime()
-{
-	static TestDatamanRuntime runtime{};
-	return runtime;
-}
 
 mission_item_s makeSafePointItem(double lat, double lon, float altitude, NAV_FRAME frame,
 				 NAV_CMD nav_cmd = NAV_CMD_RALLY_POINT)
@@ -282,14 +248,9 @@ private:
 /**
  * @brief Shared fixture for RTL helper tests.
  */
-class RTLTest : public ::testing::Test
+class RTLTest : public NavigatorDatamanTestBase
 {
 protected:
-	static void SetUpTestSuite()
-	{
-		(void)testDatamanRuntime();
-	}
-
 	Navigator _navigator{};
 	RTLTestPeer _rtl{&_navigator};
 

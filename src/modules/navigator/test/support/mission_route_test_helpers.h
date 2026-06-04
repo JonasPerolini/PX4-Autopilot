@@ -32,12 +32,9 @@
  ****************************************************************************/
 
 /**
- * @file test_RTL_helpers.h
+ * @file mission_route_test_helpers.h
  *
- * Shared helpers for MissionRoutePlanner unit tests.
- * Provides in-memory Provider implementations, mission item factory
- * functions, default configs, tolerance constants, and verification
- * helpers.
+ * Shared helpers for MissionRouteCache and MissionRoutePlanner unit tests.
  *
  * @author Jonas Perolini <jonspero@me.com>
  */
@@ -48,84 +45,49 @@
 
 #include "mission_route_cache.h"
 #include "mission_route_planner.h"
+#include "navigator_dataman_test.h"
+#include "vector_mission_item_store.h"
 
+#include <drivers/drv_hrt.h>
 #include <lib/geo/geo.h>
-#include <parameters/param.h>
 #include <px4_platform_common/log.h>
-#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
-#include <uORB/topics/vtol_vehicle_status.h>
 
 #include <inttypes.h>
-#include <cmath>
 #include <vector>
 
 using namespace time_literals;
 
+namespace navigator_test
+{
 
-/**
- * @brief In-memory planner provider for all MissionRoutePlanner tests.
- *
- * Supports two optional capabilities on top of basic vector-backed access:
- * - Fault injection: indices listed in faulty_mission_indices / faulty_safe_point_indices
- *   will fail to load, simulating SD card read errors.
- * - Load counting: missionLoadCount() / safePointLoadCount() track how many reads
- *   the planner performed, useful for verifying batching behavior.
- *
- * When constructed with just mission + safe-point vectors (the common case),
- * fault lists are empty and counters can be ignored.
- */
-class VectorProvider : public MissionRoutePlanner::Provider
+class VectorMissionRouteProvider : public MissionRoutePlanner::Provider
 {
 public:
-	VectorProvider(std::vector<mission_item_s> mission_items,
-		       std::vector<mission_item_s> safe_point_items,
-		       std::vector<int> faulty_mission_indices = {},
-		       std::vector<int> faulty_safe_point_indices = {}) :
-		_mission_items(std::move(mission_items)),
-		_safe_point_items(std::move(safe_point_items)),
-		_faulty_mission_indices(std::move(faulty_mission_indices)),
-		_faulty_safe_point_indices(std::move(faulty_safe_point_indices))
+	VectorMissionRouteProvider(const std::vector<mission_item_s> &mission_items,
+				   const std::vector<mission_item_s> &safe_point_items,
+				   const std::vector<int32_t> &faulty_mission_indices = {},
+				   const std::vector<int32_t> &faulty_safe_point_indices = {})
 	{
+		_mission_items.setItems(mission_items);
+		_safe_point_items.setItems(safe_point_items);
+		_mission_items.setLoadFailureIndices(faulty_mission_indices);
+		_safe_point_items.setLoadFailureIndices(faulty_safe_point_indices);
 	}
 
-	int missionCount() const override { return static_cast<int>(_mission_items.size()); }
+	int missionCount() const override { return static_cast<int>(_mission_items.itemCount()); }
 
 	bool loadMissionItem(int index, mission_item_s &mission_item) const override
 	{
 		++_mission_load_count;
-
-		for (int fi : _faulty_mission_indices) {
-			if (fi == index) {
-				return false;
-			}
-		}
-
-		if (index < 0 || index >= missionCount()) {
-			return false;
-		}
-
-		mission_item = _mission_items[index];
-		return true;
+		return _mission_items.loadItem(index, mission_item);
 	}
 
-	int safePointCount() const override { return static_cast<int>(_safe_point_items.size()); }
+	int safePointCount() const override { return static_cast<int>(_safe_point_items.itemCount()); }
 
 	bool loadSafePointItem(int index, mission_item_s &safe_point_item) const override
 	{
 		++_safe_point_load_count;
-
-		for (int fi : _faulty_safe_point_indices) {
-			if (fi == index) {
-				return false;
-			}
-		}
-
-		if (index < 0 || index >= safePointCount()) {
-			return false;
-		}
-
-		safe_point_item = _safe_point_items[index];
-		return true;
+		return _safe_point_items.loadItem(index, safe_point_item);
 	}
 
 	void resetCounters() const
@@ -138,20 +100,12 @@ public:
 	int safePointLoadCount() const { return _safe_point_load_count; }
 
 private:
-	std::vector<mission_item_s> _mission_items;
-	std::vector<mission_item_s> _safe_point_items;
-	std::vector<int> _faulty_mission_indices;
-	std::vector<int> _faulty_safe_point_indices;
+	VectorMissionItemStore _mission_items{};
+	VectorMissionItemStore _safe_point_items{};
 	mutable int _mission_load_count{0};
 	mutable int _safe_point_load_count{0};
 };
 
-
-// These helpers stay header-only because only a small set of navigator test TUs include
-// them today. If reuse widens or the bodies become materially larger, move them into a
-// shared test-support .cpp to avoid duplicated code generation.
-
-/** @brief Build an absolute mission item at the given coordinates. */
 static inline mission_item_s makePositionItem(double lat, double lon, float alt,
 		uint16_t nav_cmd = NAV_CMD_WAYPOINT)
 {
@@ -166,7 +120,6 @@ static inline mission_item_s makePositionItem(double lat, double lon, float alt,
 	return item;
 }
 
-/** @brief Build a mission item from a local offset relative to the reference point. */
 static inline mission_item_s makePositionItemFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt, uint16_t nav_cmd = NAV_CMD_WAYPOINT, bool autocontinue = true)
 {
@@ -179,58 +132,18 @@ static inline mission_item_s makePositionItemFromOffset(double base_lat, double 
 	return item;
 }
 
-/** @brief Build a takeoff mission item with a fixed landing-style altitude. */
 static inline mission_item_s makeTakeoffItemFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt)
 {
 	return makePositionItemFromOffset(base_lat, base_lon, north_m, east_m, alt, NAV_CMD_TAKEOFF, false);
 }
 
-/** @brief Build a land mission item with an absolute altitude. */
 static inline mission_item_s makeLandItemFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt)
 {
 	return makePositionItemFromOffset(base_lat, base_lon, north_m, east_m, alt, NAV_CMD_LAND, false);
 }
 
-/** @brief Build a takeoff mission item at absolute GPS coordinates. */
-static inline mission_item_s makeTakeoffItem(double lat, double lon, float alt)
-{
-	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_TAKEOFF);
-	item.autocontinue = false;
-	return item;
-}
-
-/** @brief Build a land mission item at absolute GPS coordinates. */
-static inline mission_item_s makeLandItem(double lat, double lon, float alt)
-{
-	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_LAND);
-	item.autocontinue = false;
-	return item;
-}
-
-/** @brief Build a DO_JUMP item for loop handling tests. */
-static inline mission_item_s makeDoJump(int16_t jump_target_index, uint16_t repeat_count,
-					uint16_t current_count = 0)
-{
-	mission_item_s item{};
-	item.nav_cmd = NAV_CMD_DO_JUMP;
-	item.do_jump_mission_index = jump_target_index;
-	item.do_jump_repeat_count = repeat_count;
-	item.do_jump_current_count = current_count;
-	return item;
-}
-
-/** @brief Build a VTOL transition command for route-state tests. */
-static inline mission_item_s makeVtolTransitionItem(uint8_t target_state)
-{
-	mission_item_s item{};
-	item.nav_cmd = NAV_CMD_DO_VTOL_TRANSITION;
-	item.params[0] = static_cast<float>(target_state);
-	return item;
-}
-
-/** @brief Build a rally point from a local offset relative to the reference point. */
 static inline mission_item_s makeSafePointFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
 {
@@ -239,15 +152,6 @@ static inline mission_item_s makeSafePointFromOffset(double base_lat, double bas
 	return item;
 }
 
-/** @brief Build a rally point at absolute GPS coordinates. */
-static inline mission_item_s makeSafePointAbsolute(double lat, double lon, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
-{
-	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_RALLY_POINT);
-	item.frame = frame;
-	return item;
-}
-
-/** @brief Build a route-planner position from a local offset relative to the reference point. */
 static inline MissionRoutePlanner::Position makePositionFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt)
 {
@@ -257,97 +161,15 @@ static inline MissionRoutePlanner::Position makePositionFromOffset(double base_l
 	return position;
 }
 
-/** @brief Build a route-planner position at absolute GPS coordinates. */
-static inline MissionRoutePlanner::Position makePositionAbsolute(double lat, double lon, float alt)
-{
-	return MissionRoutePlanner::Position{lat, lon, alt};
-}
-
-/** @brief Default route-planner config for route-following tests. */
-static inline MissionRoutePlanner::Config defaultConfig()
-{
-	MissionRoutePlanner::Config config{};
-	config.parameters.vehicle_projection_search_dist = 60.f;
-	config.parameters.safe_point_projection_search_dist = 60.f;
-	config.parameters.acceptance_radius = 10.f;
-	config.parameters.direct_acceptance_radius = 10.f;
-	config.parameters.home_altitude_amsl = 500.f;
-	return config;
-}
-
-/** @brief Config for fixed-wing vehicle tests. */
-static inline MissionRoutePlanner::Config fwConfig()
-{
-	MissionRoutePlanner::Config config = defaultConfig();
-	config.state.is_fixed_wing = true;
-	config.parameters.u_turn_penalty_m = 4000.f;
-	return config;
-}
-
-namespace rtl_test_reference
+namespace route_test_reference
 {
 static constexpr double kBaseLat = 47.397742;
 static constexpr double kBaseLon = 8.545594;
 static constexpr float kAlt = 500.f;
 }
 
-static constexpr double kLatLonToleranceDeg = 1e-7;     // ~1 cm at equator
-static constexpr float kAltitudeTolerance = 2.0f;       // meters
-static constexpr float kDistanceTolerance = 5.0f;       // meters
+} // namespace navigator_test
 
-extern "C" int dataman_main(int argc, char *argv[]);
-
-class NavigatorDatamanRuntime
-{
-public:
-	NavigatorDatamanRuntime()
-	{
-		param_control_autosave(false);
-		px4::WorkQueueManagerStart();
-
-		char name[] = "dataman";
-		char start[] = "start";
-		char ram[] = "-r";
-		char *argv[] = {name, start, ram};
-		dataman_main(3, argv);
-	}
-
-	~NavigatorDatamanRuntime()
-	{
-		param_control_autosave(true);
-
-		char name[] = "dataman";
-		char stop[] = "stop";
-		char *argv[] = {name, stop};
-		dataman_main(2, argv);
-
-		px4::WorkQueueManagerStop();
-	}
-};
-
-static inline NavigatorDatamanRuntime &navigatorDatamanRuntime()
-{
-	static NavigatorDatamanRuntime runtime{};
-	return runtime;
-}
-
-/**
- * @brief Shared dataman/work-queue lifecycle for navigator tests that need PX4 runtime services.
- */
-class NavigatorDatamanTestBase : public ::testing::Test
-{
-protected:
-	static void SetUpTestSuite()
-	{
-		(void)navigatorDatamanRuntime();
-	}
-
-	static void TearDownTestSuite() {}
-};
-
-/**
- * @brief Test-only peer for deterministic DatamanClient progress without public helper APIs.
- */
 class DatamanClientTestPeer
 {
 public:
@@ -389,9 +211,6 @@ public:
 	}
 };
 
-/**
- * @brief Test-only peer for advancing one queued DatamanCache operation deterministically.
- */
 class DatamanCacheTestPeer
 {
 public:
@@ -419,13 +238,6 @@ public:
 	}
 };
 
-/**
- * @brief Friend-backed helper for deterministically driving MissionRouteCache in tests.
- *
- * The helper advances one async cache event at a time by blocking on the real
- * dataman response fd, which lets tests stop at precise intermediate states
- * without wall-clock sleeps.
- */
 class MissionRouteCacheTestPeer
 {
 public:
@@ -555,20 +367,4 @@ private:
 
 		return forced_retry;
 	}
-};
-
-/**
- * @brief Base fixture for MissionRoutePlanner tests.
- *
- * Provides default config, projection context, and failure reason as
- * class members so individual tests do not need to repeat the same
- * 3-line declaration block.  Tests that need a different config
- * (e.g. fwConfig()) simply reassign the member.
- */
-class MissionRoutePlannerTestBase : public ::testing::Test
-{
-protected:
-	MissionRoutePlanner::Config config = defaultConfig();
-	MissionRoutePlanner::ProjectionContext ctx{};
-	MissionRoutePlanner::FailureReason reason{};
 };

@@ -42,14 +42,17 @@
 #include <gtest/gtest.h>
 
 #include "mission_route_planner.h"
-#include "test_RTL_helpers.h"
+#include "support/mission_route_test_helpers.h"
 
 #include <limits>
 #include <vector>
 
-using rtl_test_reference::kAlt;
-using rtl_test_reference::kBaseLat;
-using rtl_test_reference::kBaseLon;
+using navigator_test::VectorMissionRouteProvider;
+using navigator_test::makePositionFromOffset;
+using navigator_test::makePositionItemFromOffset;
+using navigator_test::route_test_reference::kAlt;
+using navigator_test::route_test_reference::kBaseLat;
+using navigator_test::route_test_reference::kBaseLon;
 
 class MissionRoutePlannerCandidateBufferTestPeer : public MissionRoutePlanner
 {
@@ -160,7 +163,7 @@ protected:
 		return ids;
 	}
 
-	VectorProvider provider{makeMissionItems(), {}};
+	VectorMissionRouteProvider provider{makeMissionItems(), {}};
 	MissionRoutePlannerCandidateBufferTestPeer planner{provider};
 };
 

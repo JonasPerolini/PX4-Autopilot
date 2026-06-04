@@ -52,49 +52,11 @@
 #include <gtest/gtest.h>
 
 #include "mission_base.h"
+#include "support/navigator_dataman_test.h"
 #include "support/vector_mission_item_store.h"
-
-#include <lib/parameters/param.h>
-#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
 
 #include <initializer_list>
 #include <vector>
-
-extern "C" int dataman_main(int argc, char *argv[]);
-
-class NavigatorDatamanRuntime
-{
-public:
-	NavigatorDatamanRuntime()
-	{
-		param_control_autosave(false);
-		px4::WorkQueueManagerStart();
-
-		char name[] = "dataman";
-		char start[] = "start";
-		char ram[] = "-r";
-		char *argv[] = {name, start, ram};
-		dataman_main(3, argv);
-	}
-
-	~NavigatorDatamanRuntime()
-	{
-		param_control_autosave(true);
-
-		char name[] = "dataman";
-		char stop[] = "stop";
-		char *argv[] = {name, stop};
-		dataman_main(2, argv);
-
-		px4::WorkQueueManagerStop();
-	}
-};
-
-static NavigatorDatamanRuntime &navigatorDatamanRuntime()
-{
-	static NavigatorDatamanRuntime runtime{};
-	return runtime;
-}
 
 class MissionBaseTestPeer : public MissionBase
 {
@@ -191,16 +153,9 @@ static mission_item_s makeVtolTransitionItem(int transition_mode)
 }
 
 template<typename TestPeer>
-class MissionBaseTraversalTestBase : public ::testing::Test
+class MissionBaseTraversalTestBase : public NavigatorDatamanTestBase
 {
 protected:
-	static void SetUpTestSuite()
-	{
-		(void)navigatorDatamanRuntime();
-	}
-
-	static void TearDownTestSuite() {}
-
 	TestPeer mission_base{};
 };
 

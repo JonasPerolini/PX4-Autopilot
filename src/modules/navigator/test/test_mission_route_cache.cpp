@@ -45,13 +45,17 @@
 #include <drivers/drv_hrt.h>
 
 #include "mission_route_cache.h"
-#include "test_RTL_helpers.h"
+#include "support/mission_route_test_helpers.h"
 
 #include <vector>
 
-using rtl_test_reference::kAlt;
-using rtl_test_reference::kBaseLat;
-using rtl_test_reference::kBaseLon;
+using navigator_test::makeLandItemFromOffset;
+using navigator_test::makePositionItemFromOffset;
+using navigator_test::makeSafePointFromOffset;
+using navigator_test::makeTakeoffItemFromOffset;
+using navigator_test::route_test_reference::kAlt;
+using navigator_test::route_test_reference::kBaseLat;
+using navigator_test::route_test_reference::kBaseLon;
 
 class MissionRouteCacheTest : public NavigatorDatamanTestBase
 {
