@@ -40,6 +40,7 @@
 #pragma once
 
 #include "mission_base.h"
+#include "mission_route_planner.h"
 #include <uORB/topics/rtl_time_estimate.h>
 
 class RtlBase : public MissionBase
@@ -51,7 +52,23 @@ public:
 
 	virtual rtl_time_estimate_s calc_rtl_time_estimate() = 0;
 
+	struct RouteSafePointConfig {
+		MissionRoutePlanner::Plan plan{};
+		loiter_point_s goal_land_approach{};
+		float rtl_alt{NAN};
+	};
+
 	virtual void setReturnAltMin(bool min) { (void)min;};
 
 	virtual void setRtlAlt(float alt) { (void)alt;};
+
+	/** @brief Atomically hand route-safe-point RTL state from RTL to the executor. */
+	virtual void configureRouteSafePoint(const RouteSafePointConfig &config) { (void)config; }
+
+	/**
+	 * @brief Return the most recent loop jump segment used as the projection anchor.
+	 *
+	 * Returns an invalid segment when no active DO_JUMP loop anchor is being preserved.
+	 */
+	virtual MissionRoutePlanner::Segment lastFlownLoopSegment() const { return {}; }
 };

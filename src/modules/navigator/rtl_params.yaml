@@ -79,6 +79,13 @@ parameters:
           mission path. Do not consider rally points.
         5: Return directly to safe landing point (do not consider mission landing
           and Home)
+        7: Return to the closest safe point by rejoining the uploaded mission route,
+          following it to the optimal branch-off point, then leaving the route to land
+          at the safe point. Within successful route planning, if no safe point is usable
+          PX4 falls back to the closer mission endpoint (landing or takeoff).
+          If route planning cannot run, PX4 falls back to direct RTL destination selection.
+          Uses MIS_MC_SEG_DIST, MIS_FW_SEG_DIST, RTL_RP_SEG_DIST for vehicle projection
+          search distances and RTL_FW_UTURN_PEN for fixed-wing U-turn cost.
       default: 0
     RTL_CONE_ANG:
       description:
@@ -120,6 +127,35 @@ parameters:
       min: 25
       decimal: 1
       increment: 0.5
+    RTL_RP_SEG_DIST:
+      description:
+        short: Extra cross-track search distance for safe-point route projections
+        long: |-
+          When projecting the safe point position onto the uploaded mission route (RTL_TYPE = 7).
+          A projection point is only considered a valid candidate if the crosstrack distance
+          from the safe point to the segment does not exceed the crosstrack distance
+          from the safe point to the closest available segment plus the allowed margin: RTL_RP_SEG_DIST.
+      type: float
+      default: 30.0
+      unit: m
+      min: 0
+      decimal: 1
+      increment: 1
+    RTL_FW_UTURN_PEN:
+      description:
+        short: Fixed-wing U-turn distance penalty
+        long: |-
+          Virtual distance added to the along-route path cost when the route-safe-point
+          planner (RTL_TYPE = 7) detects that a fixed-wing or VTOL-in-FW vehicle would
+          need to perform a U-turn to reach a safe point. Higher values make the planner
+          prefer forward-flowing paths over shorter but reversed ones. Set to 0 to disable
+          the penalty entirely.
+      type: float
+      default: 4000.0
+      unit: m
+      min: 0
+      decimal: 1
+      increment: 100
 - group: Return To Land
   definitions:
     RTL_TIME_FACTOR:

@@ -44,7 +44,7 @@ The following sections explain how to configure the [return type](#return_types)
 
 ## Return Types (RTL_TYPE)
 
-PX4 provides four alternative approaches for finding an unobstructed path to a safe destination and/or landing, which are set using the [RTL_TYPE](#RTL_TYPE) parameter.
+PX4 provides several alternative approaches for finding an unobstructed path to a safe destination and/or landing, which are set using the [RTL_TYPE](#RTL_TYPE) parameter.
 
 At high level these are:
 
@@ -56,6 +56,9 @@ At high level these are:
   If no _mission_ defined, return direct to home (rally points are ignored).
 - [Closest safe destination return](#closest-safe-destination-return-type-rtl-type-3) (`RTL_TYPE=3`): Ascend to a safe altitude and return via direct path to closest destination: home, start of mission landing pattern, or rally point.
   If the destination is a mission landing pattern, follow the pattern to land.
+- [Closest mission-path return](#closest-mission-path-return-type-rtl-type-4) (`RTL_TYPE=4`): Choose whichever is closer by waypoint count: mission landing via the mission path or home via the reverse mission path.
+- [Direct safe point return](#direct-safe-point-return-type-rtl-type-5) (`RTL_TYPE=5`): Return directly to a safe point, ignoring home and mission landing destinations.
+- [Route safe point return](#route-safe-point-return-type-rtl-type-7) (`RTL_TYPE=7`): Rejoin the uploaded mission route, follow it to the best safe-point branch-off, and leave the route only at that projected branch-off point. If route planning succeeds but no safe point is usable, PX4 falls back to the closer mission endpoint. If route planning cannot run, PX4 falls back to the same direct RTL destination selection used by `RTL_TYPE=3`.
 
 More detailed explanations for each of the types are provided in the following sections.
 
@@ -114,13 +117,11 @@ The behaviour is fairly complex because it depends on the flight mode, and wheth
 
 Mission _with_ landing pattern:
 
-- **Mission mode:**
-  - Mission is continued in "fast-forward mode" and then lands.
-    - DO_JUMP commands, delays and other non-position mission items are ignored, and loiter and other position waypoints are converted to simple waypoints.
+- **Mission mode:** Mission is continued in "fast-forward mode" (jumps, delay and any other non-position commands ignored, loiter and other position waypoints converted to simple waypoints) and then lands.
 - **Auto mode other than mission mode:**
   - Ascend to a safe [minimum return altitude](#minimum-return-altitude) above any expected obstacles.
   - Fly directly to closest waypoint (for FW not a landing WP) and descend to waypoint altitude.
-  - Continue mission in fast forward mode from that waypoint, using the same traversal rules as above.
+  - Continue mission in fast forward mode from that waypoint.
 - **Manual modes:**
   - Ascend to a safe [minimum return altitude](#minimum-return-altitude) above any expected obstacles.
   - Fly directly to landing sequence position and descend to waypoint altitude
@@ -130,7 +131,7 @@ Mission _without_ landing pattern defined:
 
 - **Mission mode:**
   - Mission flown "fast-backward" (in reverse) starting from the previous waypoint
-    - DO_JUMP commands, delays and other non-position mission items are ignored, and loiter and other position waypoints are converted to simple waypoints.
+    - Jumps, delay and any other non-position commands ignored, loiter and other position waypoints converted to simple waypoints.
     - VTOL vehicles transition to FW mode (if needed) before flying the mission in reverse.
   - On reaching waypoint 1, the vehicle ascends to the [minimum return altitude](#minimum-return-altitude) and flies to the home position (where it [lands or waits](#loiter-landing-at-destination)).
 - **Auto mode other than mission mode:**
@@ -141,11 +142,6 @@ Mission _without_ landing pattern defined:
 If no mission is defined PX4 will fly directly to home location and land (rally points are ignored).
 
 If the mission changes during return mode, then the behaviour is re-evaluated based on the new mission following the same rules as above (e.g. if the new mission has no landing sequence and you're in a mission, the mission is reversed).
-
-::: info
-For `RTL_TYPE=4`, PX4 currently chooses between continuing to a mission landing and reversing toward home by comparing raw mission item indices.
-This is only an approximation of the flown path length, because the number if mission items is not indicative of the distance remaining and non-position items are also counted.
-:::
 
 ### Closest Safe Destination Return Type (RTL_TYPE=3)
 
@@ -158,13 +154,45 @@ In this return type the vehicle:
   By default an MC or VTOL in MC mode will land, and a fixed-wing vehicle circles at the descent altitude.
   A VTOL in FW mode aligns its heading to the destination point, transitions to MC mode, and then lands.
 
+### Closest Mission-Path Return Type (RTL_TYPE=4)
+
+This is a mission-based return variant that compares two mission-derived options and chooses whichever is closer by waypoint count:
+
+- continue toward the mission landing pattern using the mission path, or
+- return home using the reverse mission path.
+
+Rally points are ignored.
+If no valid mission exists PX4 falls back to a direct home return.
+
+### Direct Safe Point Return Type (RTL_TYPE=5)
+
+In this return type the vehicle flies directly to a safe point and does not consider home or mission-landing destinations.
+
+If no valid safe point is available, PX4 falls back to the last known position with valid data-link context, or the current position if no better fallback exists.
+
+### Route Safe Point Return Type (RTL_TYPE=7)
+
+In this return type PX4 uses the uploaded mission geometry to reach a safe point:
+
+- The vehicle is [projected onto the uploaded mission route](../concept/mission_route_planning.md#vehicle-projection) rather than just the nearest waypoint.
+- Safe points are [filtered and scored inside the route planner](../concept/mission_route_planning.md#safe-point-scoring), including optional VTOL-approach eligibility checks for VTOL vehicles flying in FW mode. The scorer uses a bounded safe-point batch; see [Route Safe Point Return](./route_safe_point_return.md) for the current limit.
+- PX4 chooses the safe point with the shortest valid route-following return path, with multicopter direct-to-safe-point and cached branch-off reuse shortcuts.
+- `DO_JUMP` items are treated as route geometry only. RTL ignores remaining loop counts and chooses the shorter continue-vs-rewind path through the loop exit.
+- If route planning succeeds but no safe point can be selected, PX4 falls back to the better mission endpoint: mission land in nominal direction or mission takeoff in reverse.
+- If route planning cannot run, PX4 falls back to the same direct RTL destination selection used by `RTL_TYPE=3` instead of staying in the route-following type-6 handler.
+- The vehicle rejoins the route, follows it in nominal or reverse direction, replaces the active mission target with a virtual branch-off waypoint when needed, and then lands at the safe point.
+- For VTOL vehicles flying in FW mode, if the selected safe point has valid approach items, PX4 uses the same wind-based approach selection as direct RTL and flies that approach before handing over to the final landing sequence. The approach bearing is evaluated from the selected land point to each approach loiter.
+
+This mode is intended for operations where the mission path itself is the safest known corridor.
+For more information, including loop handling, branch-off injection, and current limitations, see [Route Safe Point Return](./route_safe_point_return.md).
+
 ## Minimum Return Altitude
 
 For most [return types](#return_types) a vehicle will ascend to a _minimum safe altitude_ before returning (unless already above that altitude), in order to avoid any obstacles between it and the destination.
 
 ::: info
-The exception is when executing a [mission path return](#mission-path-return-type-rtl-type-2) from _within a mission_.
-In this case the vehicle follows mission waypoints, which we assume are planned to avoid any obstacles.
+The main exceptions are mission-geometry return modes such as [mission path return](#mission-path-return-type-rtl-type-2), [closest mission-path return](#closest-mission-path-return-type-rtl-type-4), and [route safe point return](#route-safe-point-return-type-rtl-type-7).
+In these cases the vehicle can follow the uploaded mission geometry instead of first climbing to the generic RTL altitude.
 :::
 
 The return altitude for a fixed-wing vehicle or a VTOL in fixed-wing mode is configured using the parameter [RTL_RETURN_ALT](#RTL_RETURN_ALT) (does not use the code described in the next paragraph).

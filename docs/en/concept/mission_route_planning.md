@@ -5,8 +5,8 @@ It provides a non-blocking full-route cache and a stateless planner that can pro
 
 ::: info
 This page documents developer infrastructure.
-The infrastructure does not, by itself, enable a user-selectable mission smart-rejoin behavior or a mission-route-aware Return mode.
-Those behaviors are expected to be documented separately by Navigator changes that consume this planner and cache.
+It is used by [Route Safe Point Return](../flight_modes/route_safe_point_return.md), the route-aware RTL mode that rejoins the uploaded mission route and branches off to a selected safe point.
+User-facing behavior and setup details for that mode are documented separately from this infrastructure page.
 :::
 
 ## Purpose
@@ -16,6 +16,7 @@ Navigator can load the next few mission items asynchronously from dataman and ke
 
 Route-based planning has different access patterns.
 To project a position onto the uploaded route or compare safe points against route segments, the planner must scan mission geometry in arbitrary order without triggering blocking dataman reads.
+Route Safe Point Return uses this path to project the current vehicle position, score safe points, and build the route-following RTL plan.
 The route-planning infrastructure separates that work into:
 
 - `MissionRouteCache`: a Navigator-owned, dataman-backed provider for mission geometry, the mission landing item, and safe points.
@@ -67,6 +68,7 @@ The current infrastructure exposes these planning products:
 
 The planner computes this data only.
 It does not publish setpoints, change mission indices, or activate flight-mode behavior.
+Route Safe Point Return consumes the `Plan` output in `rtl.cpp` and executes it through `RtlMissionSafePointFollow`.
 
 ## Projection Candidate Search
 
@@ -183,17 +185,16 @@ The infrastructure has focused coverage in Navigator tests:
 
 - `functional-test_mission_route_cache` covers mission-cache loading, too-large mission rejection, mission-land caching, safe-point retry behavior, safe-point identity changes, and stale-data protection during reload.
 - `functional-test_mission_route_planner_candidates` covers route projection candidate handling, corner behavior, candidate ordering, and invalid input rejection close to the planner.
-- `functional-test_mission_base` remains the shared baseline for existing mission behavior while this infrastructure is present but not yet used by Mission or RTL execution paths.
+- `functional-test_mission_base` remains the shared baseline for existing mission behavior and the MissionBase helpers that route-following consumers reuse.
+- `functional-test_RTL_projection`, `functional-test_RTL_safe_point`, and `functional-test_RTL_mission_safe_point_follow` cover the Route Safe Point Return consumer: vehicle projection, safe-point scoring, route fallback, and executor stage transitions.
 
 Future behavior changes that consume this infrastructure should add their own execution and integration coverage for the specific Mission or RTL modes they enable.
 
 ## Deferred Behavior
 
-This infrastructure intentionally does not document or enable:
+This infrastructure page intentionally does not document:
 
 - A user-facing smart mission rejoin parameter.
-- A new Return mode type that follows the mission path.
-- Route-following, branch-off, final approach, or landing executor stages.
-- User setup instructions for route-aware RTL behavior.
+- User setup instructions for Route Safe Point Return; see [Route Safe Point Return](../flight_modes/route_safe_point_return.md).
 
-Those topics belong with the behavior changes that wire the planner into Mission and RTL execution.
+Mission smart rejoin remains a separate behavior change from the Route Safe Point Return RTL consumer.

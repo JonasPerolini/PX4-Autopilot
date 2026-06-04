@@ -13,3 +13,4 @@ uint8 RTL_STATUS_TYPE_DIRECT_SAFE_POINT=1 	# chosen to directly go to a safe poi
 uint8 RTL_STATUS_TYPE_DIRECT_MISSION_LAND=2 	# going straight to the beginning of the mission landing
 uint8 RTL_STATUS_TYPE_FOLLOW_MISSION=3 		# Following the mission from start index to mission landing. Start index is current WP if in Mission mode, and closest WP otherwise.
 uint8 RTL_STATUS_TYPE_FOLLOW_MISSION_REVERSE=4 	# Following the mission in reverse from start index to the beginning of the mission. Start index is previous WP if in Mission mode, and closest WP otherwise.
+uint8 RTL_STATUS_TYPE_FOLLOW_MISSION_SAFE_POINT=5 # Following the mission route to a safe-point branch-off, then leaving the route to land at the selected safe point.

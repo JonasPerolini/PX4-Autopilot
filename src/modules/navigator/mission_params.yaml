@@ -115,3 +115,31 @@ parameters:
       unit: s
       min: 0
       decimal: 1
+    MIS_MC_SEG_DIST:
+      description:
+        short: Extra cross-track search distance for multicopter route projections
+        long: |-
+          When projecting the vehicle position onto the uploaded mission route for RTL_TYPE = 7.
+          A projection point is only considered a valid candidate if the crosstrack distance
+          from the vehicle to the segment does not exceed the crosstrack distance
+          from the vehicle to the closest available segment plus the allowed margin: MIS_MC_SEG_DIST.
+      type: float
+      default: 30.0
+      unit: m
+      min: 0
+      decimal: 1
+      increment: 1
+    MIS_FW_SEG_DIST:
+      description:
+        short: Extra cross-track search distance for fixed-wing mission-route projections
+        long: |-
+          When projecting the vehicle position onto the uploaded mission route for RTL_TYPE = 7.
+          A projection point is only considered a valid candidate if the crosstrack distance
+          from the vehicle to the segment does not exceed the crosstrack distance
+          from the vehicle to the closest available segment plus the allowed margin: MIS_FW_SEG_DIST.
+      type: float
+      default: 150.0
+      unit: m
+      min: 0
+      decimal: 1
+      increment: 1

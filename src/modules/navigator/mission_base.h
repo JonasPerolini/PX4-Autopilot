@@ -51,16 +51,19 @@
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/vtol_vehicle_status.h>
 #include <uORB/Subscription.hpp>
 #include <uORB/SubscriptionInterval.hpp>
 #include <uORB/Publication.hpp>
 
 #include "mission_block.h"
 #include "navigation.h"
+#include "mission_route_planner.h"
 
 using namespace time_literals;
 
 class Navigator;
+class MissionBaseTestPeer;
 
 class MissionBase : public MissionBlock, public ModuleParams
 {
@@ -87,6 +90,8 @@ protected:
 	enum class WorkItemType {
 		WORK_ITEM_TYPE_DEFAULT,		/**< default mission item */
 		WORK_ITEM_TYPE_CLIMB,		/**< takeoff before moving to waypoint */
+		WORK_ITEM_TYPE_JOIN_ROUTE,	/**< fly a virtual branch-in waypoint before resuming route following */
+		WORK_ITEM_TYPE_TRANSITION_AFTER_JOIN,	/**< perform the required VTOL transition after rejoining the route */
 		WORK_ITEM_TYPE_MOVE_TO_LAND,	/**< move to land waypoint before descent */
 		WORK_ITEM_TYPE_ALIGN_HEADING,		/**< align for next waypoint */
 		WORK_ITEM_TYPE_TRANSITION_AFTER_TAKEOFF,
@@ -103,6 +108,11 @@ protected:
 		FollowMissionControlFlow = 0,
 		IgnoreDoJump,
 	};
+
+	using VtolTransitionAction = MissionRoutePlanner::VtolTransitionAction;
+
+	MissionRoutePlanner::JoinContext _route_join_context{};
+	static constexpr float kJoinRouteFlyByAcceptanceRadiusScale{2.f};
 
 	/**
 	 * @brief Get the previous mission position items using this mode's traversal policy.
@@ -377,6 +387,29 @@ protected:
 	bool position_setpoint_equal(const position_setpoint_s *p1, const position_setpoint_s *p2) const;
 
 	/**
+	 * @brief Arm a virtual branch-in waypoint for route-following modes.
+	 *
+	 * Callers provide planner-owned join geometry and this helper fills the
+	 * required VTOL transition decision before arming the temporary work item.
+	 */
+	void setupJoinRoute(MissionRoutePlanner::JoinContext &join_context,
+			    const MissionRoutePlanner::Path &path);
+
+	/** @brief Clear any pending virtual join-route state. */
+	void resetJoinRouteState();
+
+	/**
+	 * @brief Publish the active join-route pipeline work item if one is pending.
+	 *
+	 * @return true if a join-route-related work item was published and the caller should return.
+	 */
+	bool handleJoinRouteWorkItems(position_setpoint_triplet_s *pos_sp_triplet,
+				      const position_setpoint_s &current_setpoint_copy);
+
+	/** @brief Compute the front-transition yaw used when entering route-following geometry. */
+	float computeFrontTransitionAlignmentYaw(int32_t current_target_index);
+
+	/**
 	 * @brief Traversal mode used by this navigation mode when walking position items.
 	 *
 	 * Mission mode follows active DO_JUMP control flow by default. Derived modes such as
@@ -404,6 +437,9 @@ protected:
 	 */
 	virtual bool loadMissionItemFromCache(int32_t index, mission_item_s &mission_item);
 
+	/** @brief Mirror an in-place mission item update into the route-planner cache when present. */
+	void syncMissionRouteCacheItem(int32_t index, const mission_item_s &mission_item);
+
 	/**
 	 * @brief Find the next position mission item.
 	 *
@@ -430,6 +466,34 @@ protected:
 	bool findPreviousPositionIndex(int32_t start_index, int32_t &previous_index,
 				       MissionTraversalType traversal_type);
 
+	/**
+	 * @brief Find the nearest position item at or before the given index.
+	 *
+	 * Walks backward from @p start_index (inclusive) to find the first
+	 * position-bearing mission item.
+	 */
+	bool findAttachedPositionIndex(int32_t start_index, int32_t &attached_index);
+
+	/**
+	 * @brief Get the expected VTOL state at a given mission anchor index.
+	 *
+	 * Walks backward from @p anchor_index to find the most recent
+	 * NAV_CMD_DO_VTOL_TRANSITION item and returns the transition mode.
+	 */
+	uint8_t getVtolStateAtMissionIndex(int32_t anchor_index);
+
+	/** @brief Return whether the vehicle is already in fixed-wing mode or transitioning into it. */
+	static bool vehicleInFwLikeState(const vehicle_status_s &vehicle_status);
+
+	/** @brief Determine the VTOL transition action required to enter a segment. */
+	VtolTransitionAction vtolTransitionActionForTarget(int32_t target_index, bool direction_reversed);
+
+	/** @brief Determine the VTOL transition action required after reaching a reverse route target. */
+	VtolTransitionAction vtolTransitionActionAfterReachingReverseTarget(int32_t reached_target_index);
+
+	/** @brief Cache the DO_JUMP loop segment that the next forward nominal advance would traverse. */
+	void updateLastFlownLoopSegmentForNominalAdvance(MissionRoutePlanner::Segment &last_flown_loop_segment);
+
 	bool _is_current_planned_mission_item_valid{false};	/**< Flag indicating if the currently loaded mission item is valid*/
 	bool _mission_has_been_activated{false};		/**< Flag indicating if the mission has been activated*/
 	bool _mission_checked{false};				/**< Flag indicating if the mission has been checked by the mission validator*/
@@ -453,6 +517,8 @@ protected:
 	uORB::Publication<navigator_mission_item_s> _navigator_mission_item_pub{ORB_ID::navigator_mission_item}; /**< Navigator mission item publication*/
 	uORB::Publication<mission_s> _mission_pub{ORB_ID(mission)}; /**< Mission publication*/
 private:
+	friend class MissionBaseTestPeer;
+
 	/**
 	 * @brief Maximum number of jump mission items iterations
 	 *
@@ -484,6 +550,19 @@ private:
 	 * Set a mission item as reached
 	 */
 	void set_mission_item_reached();
+
+	/** @brief Suppress mission-item reached reports for synthetic helper work items. */
+	bool shouldReportMissionItemReached() const;
+
+	/** @brief Publish the virtual branch-in waypoint when JOIN_ROUTE is active. */
+	bool handleJoinRouteWaypoint(position_setpoint_triplet_s *pos_sp_triplet,
+				     const position_setpoint_s &current_setpoint_copy);
+
+	/** @brief Publish the post-join VTOL transition command when it is still required. */
+	bool handleTransitionAfterJoin(position_setpoint_triplet_s *pos_sp_triplet);
+
+	/** @brief Return whether the post-join VTOL transition still needs to be flown. */
+	bool joinRouteTransitionStillRequired() const;
 
 	/**
 	 * Updates the heading of the vehicle. Rotary wings only.
@@ -595,6 +674,7 @@ private:
 	mission_item_s _last_camera_mode_item {};
 	mission_item_s _last_camera_trigger_item {};
 	mission_item_s _last_speed_change_item {};
+	uint8_t _vtol_state_on_mission_upload{vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC};
 
 	DEFINE_PARAMETERS_CUSTOM_PARENT(
 		ModuleParams,

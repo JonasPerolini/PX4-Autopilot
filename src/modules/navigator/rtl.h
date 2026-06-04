@@ -51,6 +51,8 @@
 #include "rtl_direct_mission_land.h"
 #include "rtl_mission_fast.h"
 #include "rtl_mission_fast_reverse.h"
+#include "rtl_mission_safe_point_follow.h"
+#include "mission_route_planner.h"
 
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
@@ -62,6 +64,7 @@
 #include <uORB/topics/rtl_time_estimate.h>
 
 class Navigator;
+class MissionRouteCache;
 class RTLTestPeer;
 
 class RTL : public NavigatorMode, public ModuleParams
@@ -69,7 +72,7 @@ class RTL : public NavigatorMode, public ModuleParams
 public:
 	RTL(Navigator *navigator);
 
-	~RTL() = default;
+	~RTL() override { delete _rtl_mission_type_handle; }
 
 	enum class RtlType {
 		NONE = rtl_status_s::RTL_STATUS_TYPE_NONE,
@@ -77,9 +80,11 @@ public:
 		RTL_DIRECT_MISSION_LAND = rtl_status_s::RTL_STATUS_TYPE_DIRECT_MISSION_LAND,
 		RTL_MISSION_FAST = rtl_status_s::RTL_STATUS_TYPE_FOLLOW_MISSION,
 		RTL_MISSION_FAST_REVERSE = rtl_status_s::RTL_STATUS_TYPE_FOLLOW_MISSION_REVERSE,
+		RTL_MISSION_SAFE_POINT_FOLLOW = rtl_status_s::RTL_STATUS_TYPE_FOLLOW_MISSION_SAFE_POINT,
 	};
 
 	void on_inactive() override;
+	void on_inactivation() override;
 	void on_activation() override;
 	void on_active() override;
 
@@ -87,9 +92,9 @@ public:
 
 	void set_return_alt_min(bool min) { _enforce_rtl_alt = min; }
 
-	void updateSafePoints(uint32_t new_safe_point_id) { _initiate_safe_points_updated = true; _safe_points_id = new_safe_point_id; }
-
 	bool isLanding();
+
+	friend class RTLTestPeer;
 
 private:
 	friend class RTLTestPeer;
@@ -97,24 +102,15 @@ private:
 	enum class DestinationType {
 		DESTINATION_TYPE_HOME,
 		DESTINATION_TYPE_MISSION_LAND,
-		DESTINATION_TYPE_SAFE_POINT
+		DESTINATION_TYPE_SAFE_POINT,
+		DESTINATION_TYPE_MISSION_TAKEOFF
 	};
-
-protected:
-
-	/**
-	 * @brief Load one safe-point mission item from the safe-point dataman cache.
-	 */
-	virtual bool loadSafePointItemWait(int seq, mission_item_s &item, hrt_abstime timeout) const;
-
-private:
 
 	/**
 	 * @brief Check mission landing validity
 	 * @return true if mission has a land start, a land and is valid
 	 */
 	bool hasMissionLandStart() const;
-
 
 	/**
 	 * @brief Check whether there are more waypoints between current waypoint
@@ -124,10 +120,40 @@ private:
 	bool reverseIsFurther() const;
 
 	/**
-	 * @brief function to call regularly to do background work
+	 * @brief Drop the route-safe-point continuity hints that depend on the active mission or safe-point set.
+	 */
+	void resetRouteSafePointState();
+
+	/**
+	 * @brief Refresh the mission and safe-point caches used by route-safe-point RTL.
 	 */
 	void updateDatamanCache();
 
+	/** @brief Build the route-safe-point planner input for the current vehicle and mission state. */
+	MissionRoutePlanner::Config buildRouteSafePointConfig(bool last_route_direction_reversed) const;
+
+	/** @brief Evaluate a fresh route-safe-point plan. */
+	bool evaluateRouteSafePointPlan(const MissionRouteCache &mission_route_cache,
+					MissionRoutePlanner::Plan &new_plan);
+
+	/** @brief Apply a valid route-safe-point plan to the RTL destination/output state. */
+	void applyRouteSafePointPlan(const MissionRoutePlanner::Plan &plan,
+				     bool current_route_direction_reversed,
+				     RtlType &new_rtl_type,
+				     DestinationType &destination_type,
+				     PositionYawSetpoint &destination,
+				     uint8_t &safe_point_index);
+
+	/** @brief Convert a route-safe-point planner goal into the outer RTL destination category. */
+	static DestinationType routePlanDestinationType(MissionRoutePlanner::GoalType goal_type);
+
+	/** @brief Fall back from route-safe-point RTL to the existing direct or mission-land logic. */
+	void applyRouteSafePointFallback(RtlType &new_rtl_type,
+					 DestinationType &destination_type,
+					 PositionYawSetpoint &destination,
+					 uint8_t &safe_point_index);
+
+	/** @brief Select the active RTL executor, destination, and route-safe-point plan if applicable. */
 	void setRtlTypeAndDestination();
 
 	/**
@@ -141,6 +167,10 @@ private:
 	 *
 	 */
 	void findRtlDestination(DestinationType &destination_type, PositionYawSetpoint &destination, uint8_t &safe_point_index);
+	/** @brief Resolve the RTL destination for a specific RTL_TYPE policy. */
+
+	void findRtlDestinationForType(int rtl_type, DestinationType &destination_type,
+				       PositionYawSetpoint &destination, uint8_t &safe_point_index);
 
 	/**
 	 * @brief Find RTL destination if only safe points are considered
@@ -172,10 +202,11 @@ private:
 	float computeReturnAltitude(const PositionYawSetpoint &rtl_position) const;
 
 	/**
-	 * @brief initialize RTL mission type
+	 * @brief Construct and initialize the selected mission-based RTL executor.
 	 *
+	 * @return true if the executor was created and initialized successfully
 	 */
-	void initRtlMissionType(RtlType new_rtl_type, float rtl_alt);
+	bool initRtlMissionType(RtlType new_rtl_type, float rtl_alt);
 
 	/**
 	 * @brief Update parameters
@@ -256,25 +287,24 @@ private:
 	RtlBase *_rtl_mission_type_handle{nullptr};
 	RtlType _rtl_type{RtlType::RTL_DIRECT};
 
-	bool _home_has_land_approach;			///< Flag if the home position has a land approach defined
-	bool _one_rally_point_has_land_approach;	///< Flag if a rally point has a land approach defined
+	bool _home_has_land_approach{false};           ///< Flag if the home position has a land approach defined
+	bool _any_safe_point_has_land_approach{false}; ///< Flag if a rally point has a land approach defined
 
-	DatamanState _dataman_state{DatamanState::UpdateRequestWait};
-	DatamanState _error_state{DatamanState::UpdateRequestWait};
-	uint32_t _opaque_id{0}; ///< dataman safepoint id: if it does not match, safe points data was updated
-	bool _safe_points_updated{false}; ///< flag indicating if safe points are updated to dataman cache
-	mutable DatamanCache _dataman_cache_safepoint{"rtl_dm_cache_miss_geo", 4};
-	DatamanClient	&_dataman_client_safepoint = _dataman_cache_safepoint.client();
-	bool _initiate_safe_points_updated{true}; ///< flag indicating if safe points update is needed
-	mutable DatamanCache _dataman_cache_landItem{"rtl_dm_cache_miss_land", 2};
-	uint32_t _mission_id = 0u;
-	uint32_t _safe_points_id = 0u;
-
-	mission_stats_entry_s _stats;
+	uint32_t _last_route_safe_point_warning_mission_id{0};
+	uint32_t _route_plan_mission_id{0};
+	uint16_t _route_plan_mission_count{0};
+	uint8_t _route_plan_mission_dataman_id{0};
+	uint32_t _route_plan_safe_points_id{0};
+	uint8_t _route_plan_safe_points_dataman_id{0};
 
 	RtlDirect _rtl_direct;
 
 	bool _enforce_rtl_alt{false};
+	// The planner cannot infer direction from mission_index alone when the vehicle is near a shared waypoint:
+	// the same target index can mean "arriving from ahead" or "arriving from behind".
+	// Keep the last chosen route direction as a continuity hint for the next type-6 planning pass.
+	bool _route_safe_point_direction_reversed{false};
+	MissionRoutePlanner::Segment _last_route_safe_point_loop_segment{};
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::RTL_TYPE>)          _param_rtl_type,
@@ -282,7 +312,11 @@ private:
 		(ParamFloat<px4::params::RTL_RETURN_ALT>)  _param_rtl_return_alt,
 		(ParamFloat<px4::params::RTL_MIN_DIST>)    _param_rtl_min_dist,
 		(ParamFloat<px4::params::NAV_ACC_RAD>)     _param_nav_acc_rad,
-		(ParamInt<px4::params::RTL_APPR_FORCE>)    _param_rtl_appr_force
+		(ParamInt<px4::params::RTL_APPR_FORCE>)    _param_rtl_appr_force,
+		(ParamFloat<px4::params::MIS_MC_SEG_DIST>) _param_mis_mc_seg_dist,
+		(ParamFloat<px4::params::MIS_FW_SEG_DIST>) _param_mis_fw_seg_dist,
+		(ParamFloat<px4::params::RTL_RP_SEG_DIST>) _param_rtl_rp_seg_dist,
+		(ParamFloat<px4::params::RTL_FW_UTURN_PEN>) _param_rtl_fw_uturn_pen
 	)
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
