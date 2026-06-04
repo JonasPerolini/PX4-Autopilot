@@ -92,6 +92,11 @@ public:
 		return _safe_point_items.loadItem(index, safe_point_item);
 	}
 
+	bool scanVtolLandApproachBlockForTest(int safe_point_index, float home_altitude_amsl, land_approaches_s *result) const
+	{
+		return scanVtolLandApproachBlock(safe_point_index, home_altitude_amsl, result);
+	}
+
 	void resetCounters() const
 	{
 		_mission_load_count = 0;

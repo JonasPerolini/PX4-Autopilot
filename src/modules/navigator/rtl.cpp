@@ -129,7 +129,7 @@ void RTL::resetRouteSafePointState()
 	_last_route_safe_point_loop_segment = {};
 	_route_safe_point_direction_reversed = false;
 	_home_has_land_approach = false;
-	_any_safe_point_has_land_approach = false;
+	_one_rally_point_has_land_approach = false;
 	_last_route_safe_point_warning_mission_id = 0;
 }
 
@@ -381,7 +381,7 @@ void RTL::setRtlTypeAndDestination()
 	} else if (_param_rtl_type.get() == RTL_TYPE_ROUTE_SAFE_POINT) {
 		const bool current_route_direction_reversed = _route_safe_point_direction_reversed;
 		_home_has_land_approach = mission_route_cache != nullptr
-					  && mission_route_cache->hasVtolLandApproach(destination, _home_pos_sub.get().alt);
+					  && mission_route_cache->hasVtolLandApproachesNearLocation(destination, _home_pos_sub.get().alt);
 
 		const bool mission_route_cache_ready =  mission_route_cache != nullptr
 							&& mission_route_cache->safePointsReady()
@@ -471,7 +471,7 @@ void RTL::setRtlTypeAndDestination()
 	rtl_status_s rtl_status{};
 	rtl_status.safe_points_id = mission_route_cache != nullptr ? mission_route_cache->safePointsId() : 0;
 	rtl_status.is_evaluation_pending = mission_route_cache != nullptr && mission_route_cache->safePointUpdatePending();
-	rtl_status.has_vtol_approach = _home_has_land_approach || _any_safe_point_has_land_approach;
+	rtl_status.has_vtol_approach = _home_has_land_approach || _one_rally_point_has_land_approach;
 	rtl_status.rtl_type = static_cast<uint8_t>(_rtl_type);
 	rtl_status.safe_point_index = safe_point_index;
 	rtl_status.timestamp = hrt_absolute_time();
@@ -515,7 +515,7 @@ bool RTL::evaluateRouteSafePointPlan(const MissionRouteCache &mission_route_cach
 	new_plan = {};
 	const float home_altitude_amsl = _home_pos_sub.get().alt;
 	const MissionRoutePlanner::Config config = buildRouteSafePointConfig(_route_safe_point_direction_reversed);
-	_any_safe_point_has_land_approach = mission_route_cache.anySafePointHasVtolLandApproach(home_altitude_amsl);
+	_one_rally_point_has_land_approach = mission_route_cache.anySafePointHasVtolLandApproach(home_altitude_amsl);
 	const MissionRoutePlanner::Position vehicle_position{_global_pos_sub.get().lat, _global_pos_sub.get().lon, _global_pos_sub.get().alt};
 	MissionRoutePlanner planner(mission_route_cache);
 
@@ -626,7 +626,7 @@ PositionYawSetpoint RTL::findClosestSafePoint(float min_dist, uint8_t &safe_poin
 	MissionRouteCache *mission_route_cache = _navigator->get_mission_route_cache();
 
 	PositionYawSetpoint safe_point{static_cast<double>(NAN), static_cast<double>(NAN), NAN, NAN};
-	_any_safe_point_has_land_approach = false;
+	_one_rally_point_has_land_approach = false;
 
 	if (mission_route_cache == nullptr || !mission_route_cache->safePointsReady()) {
 		return safe_point;
@@ -660,10 +660,10 @@ PositionYawSetpoint RTL::findClosestSafePoint(float min_dist, uint8_t &safe_poin
 					 safepoint_position.lat, safepoint_position.lon)};
 
 			const bool current_safe_point_has_approaches{
-				mission_route_cache->hasVtolLandApproach(current_seq, _home_pos_sub.get().alt)
+				mission_route_cache->hasVtolLandApproachesAtSafePointIndex(current_seq, _home_pos_sub.get().alt)
 			};
 
-			_any_safe_point_has_land_approach |= current_safe_point_has_approaches;
+			_one_rally_point_has_land_approach |= current_safe_point_has_approaches;
 
 			if (((dist + MIN_DIST_THRESHOLD) < min_dist)
 			    && (!vtol_in_fw_mode || (_param_rtl_appr_force.get() == 0) || current_safe_point_has_approaches)) {
@@ -696,7 +696,7 @@ void RTL::findRtlDestinationForType(int rtl_type, DestinationType &destination_t
 
 	if (rtl_type != RTL_TYPE_SAFE_POINT_DIRECT) {
 		_home_has_land_approach = mission_route_cache != nullptr
-					  && mission_route_cache->hasVtolLandApproach(destination, _home_pos_sub.get().alt);
+					  && mission_route_cache->hasVtolLandApproachesNearLocation(destination, _home_pos_sub.get().alt);
 
 		const bool prioritize_safe_points_over_home = ((rtl_type == 1) && !vtol_in_rw_mode);
 		const bool required_approach_missing_for_home = (vtol_in_fw_mode && (_param_rtl_appr_force.get() == 1) && !_home_has_land_approach);
@@ -947,14 +947,8 @@ loiter_point_s RTL::selectLandingApproach(const PositionYawSetpoint &destination
 		return landing_approach;
 	}
 
-	const MissionRouteCache *mission_route_cache = _navigator->get_mission_route_cache();
-
-	if (mission_route_cache == nullptr) {
-		return landing_approach;
-	}
-
 	const land_approaches_s vtol_land_approaches =
-		mission_route_cache->readVtolLandApproaches(destination, _home_pos_sub.get().alt);
+		_navigator->get_mission_route_cache()->getVtolLandApproachesNearLocation(destination, _home_pos_sub.get().alt);
 
 	if (vtol_land_approaches.isAnyApproachValid()) {
 		landing_approach = chooseBestLandingApproach(vtol_land_approaches);

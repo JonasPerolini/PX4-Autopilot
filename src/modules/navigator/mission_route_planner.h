@@ -399,14 +399,19 @@ public:
 		virtual int safePointCount() const = 0;
 		/** @brief Load one safe-point store item by index. */
 		virtual bool loadSafePointItem(int index, mission_item_s &safe_point_item) const = 0;
-		/** @brief Read all VTOL landing approaches associated with one safe point. */
-		virtual land_approaches_s readVtolLandApproach(int safe_point_index, float home_altitude_amsl) const;
-		/** @brief Read all VTOL landing approaches associated with the rtl_position. */
-		virtual land_approaches_s readVtolLandApproaches(const PositionYawSetpoint &rtl_position, float home_altitude_amsl) const;
-		/** @brief Return whether rtl_position has at least one valid VTOL landing approach. */
-		virtual bool hasVtolLandApproach(const PositionYawSetpoint &rtl_position, float home_altitude_amsl) const;
-		/** @brief Return whether the indexed safe point has at least one valid VTOL landing approach. */
-		virtual bool hasVtolLandApproach(int safe_point_index, float home_altitude_amsl) const;
+		/**
+		 * @brief Read the landing-approach block associated with the first valid rally point near rtl_position.
+		 *
+		 * A block starts at the associated rally point and contains the consecutive NAV_CMD_LOITER_TO_ALT
+		 * items that follow it. The next rally point starts a new block.
+		 * Invalid rally points are skipped so a later nearby valid rally point can still be considered.
+		 */
+		virtual land_approaches_s getVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position,
+				float home_altitude_amsl) const;
+		/** @brief Return whether a valid associated block near rtl_position has at least one valid approach. */
+		virtual bool hasVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position, float home_altitude_amsl) const;
+		/** @brief Return whether the block after safe_point_index contains at least one valid approach. */
+		virtual bool hasVtolLandApproachesAtSafePointIndex(int safe_point_index, float home_altitude_amsl) const;
 		/** @brief Return whether any safe point has at least one valid VTOL landing approach. */
 		virtual bool anySafePointHasVtolLandApproach(float home_altitude_amsl) const;
 
@@ -456,14 +461,29 @@ public:
 			return false;
 		}
 
+	protected:
+		/**
+		 * @brief Scan the rally block following one safe point for valid landing approaches.
+		 *
+		 * A block is the consecutive NAV_CMD_LOITER_TO_ALT items after safe_point_index; the next
+		 * rally point starts a different block and stops the scan.
+		 *
+		 * If result is non-null, all valid approaches are collected into it.
+		 * If result is null, returns true on the first valid approach (early exit).
+		 *
+		 * @return true if at least one valid approach was found.
+		 */
+		bool scanVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl, land_approaches_s *result) const;
+
 	private:
-		/** @brief Collect all LOITER_TO_ALT items in the rally block following one safe point. */
-		void collectVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl, land_approaches_s &vtol_land_approaches) const;
-		/** @brief Return whether the rally block following one safe point contains a valid landing approach. */
-		bool hasValidVtolLandApproachInBlock(int safe_point_index, float home_altitude_amsl) const;
-		/** @brief Find the valid safe point whose lat/lon is close to the rtl_position. */
+		/**
+		 * @brief Find the first rally point whose block should be associated with rtl_position.
+		 *
+		 * Invalid rally points are skipped so nearby valid fallbacks can still be associated.
+		 * On success, safe_point_index and safe_point_item are populated with the rally point that starts the block.
+		 */
 		bool findAssociatedSafePointIndex(const PositionYawSetpoint &rtl_position, float home_altitude_amsl,
-						  int &safe_point_index) const;
+						  int &safe_point_index, mission_item_s &safe_point_item) const;
 	};
 
 	explicit MissionRoutePlanner(const Provider &provider) : _provider(provider) {}

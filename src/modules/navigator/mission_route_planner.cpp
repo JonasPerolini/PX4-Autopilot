@@ -79,10 +79,10 @@ bool MissionRoutePlanner::isTakeoffCmd(uint16_t nav_cmd)
 	return nav_cmd == NAV_CMD_TAKEOFF || nav_cmd == NAV_CMD_VTOL_TAKEOFF;
 }
 
-void MissionRoutePlanner::Provider::collectVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl,
-		land_approaches_s &vtol_land_approaches) const
+bool MissionRoutePlanner::Provider::scanVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl,
+		land_approaches_s *result) const
 {
-	uint8_t approach_counter = 0;
+	uint8_t valid_approach_counter = 0;
 	const int safe_point_count = safePointCount();
 
 	for (int current_seq = safe_point_index + 1; current_seq < safe_point_count; ++current_seq) {
@@ -93,54 +93,33 @@ void MissionRoutePlanner::Provider::collectVtolLandApproachBlock(int safe_point_
 		}
 
 		if (mission_item.nav_cmd == NAV_CMD_RALLY_POINT) {
+			// A rally point starts the next block, break
 			break;
 		}
 
 		if (mission_item.nav_cmd != NAV_CMD_LOITER_TO_ALT
-		    || approach_counter >= land_approaches_s::num_approaches_max) {
+		    || valid_approach_counter >= land_approaches_s::num_approaches_max) {
 			continue;
 		}
 
 		const loiter_point_s approach = makeVtolLandApproachPoint(mission_item, home_altitude_amsl);
 
 		if (approach.isValid()) {
-			vtol_land_approaches.approaches[approach_counter] = approach;
-			approach_counter++;
-		}
-	}
-}
+			if (result) {
+				result->approaches[valid_approach_counter] = approach;
+				valid_approach_counter++;
 
-bool MissionRoutePlanner::Provider::hasValidVtolLandApproachInBlock(int safe_point_index, float home_altitude_amsl) const
-{
-	const int safe_point_count = safePointCount();
-
-	for (int current_seq = safe_point_index + 1; current_seq < safe_point_count; ++current_seq) {
-		mission_item_s mission_item{};
-
-		if (!loadSafePointItem(current_seq, mission_item)) {
-			break;
-		}
-
-		if (mission_item.nav_cmd == NAV_CMD_RALLY_POINT) {
-			break;
-		}
-
-		if (mission_item.nav_cmd != NAV_CMD_LOITER_TO_ALT) {
-			continue;
-		}
-
-		const loiter_point_s approach = makeVtolLandApproachPoint(mission_item, home_altitude_amsl);
-
-		if (approach.isValid()) {
-			return true;
+			} else {
+				return true; // Early exit for the check-only path
+			}
 		}
 	}
 
-	return false;
+	return result ? (valid_approach_counter > 0) : false;
 }
 
 bool MissionRoutePlanner::Provider::findAssociatedSafePointIndex(const PositionYawSetpoint &rtl_position,
-		float home_altitude_amsl, int &safe_point_index) const
+		float home_altitude_amsl, int &safe_point_index, mission_item_s &safe_point_item) const
 {
 	for (int current_seq = 0; current_seq < safePointCount(); ++current_seq) {
 		mission_item_s mission_item{};
@@ -164,32 +143,12 @@ bool MissionRoutePlanner::Provider::findAssociatedSafePointIndex(const PositionY
 
 		if (dist_to_safepoint < MissionRoutePlanner::kLandApproachAssociationDistanceM) {
 			safe_point_index = current_seq;
+			safe_point_item = mission_item;
 			return true;
 		}
 	}
 
 	return false;
-}
-
-land_approaches_s MissionRoutePlanner::Provider::readVtolLandApproach(int safe_point_index, float home_altitude_amsl) const
-{
-	land_approaches_s vtol_land_approaches{};
-	mission_item_s safe_point_item{};
-
-	if (!loadSafePointItem(safe_point_index, safe_point_item)) {
-		return vtol_land_approaches;
-	}
-
-	MissionRoutePlanner::Position safe_point_position{};
-
-	if (!MissionRoutePlanner::extractValidSafePointPosition(safe_point_item, home_altitude_amsl, safe_point_position)) {
-		return vtol_land_approaches;
-	}
-
-	vtol_land_approaches.land_location_lat_lon = matrix::Vector2d(safe_point_position.lat, safe_point_position.lon);
-	collectVtolLandApproachBlock(safe_point_index, home_altitude_amsl, vtol_land_approaches);
-
-	return vtol_land_approaches;
 }
 
 const char *MissionRoutePlanner::failureReasonString(FailureReason failure_reason)
@@ -300,48 +259,58 @@ bool MissionRoutePlanner::extractValidSafePointPosition(const mission_item_s &sa
 	return position.valid();
 }
 
-land_approaches_s MissionRoutePlanner::Provider::readVtolLandApproaches(const PositionYawSetpoint &rtl_position,
+land_approaches_s MissionRoutePlanner::Provider::getVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position,
 		float home_altitude_amsl) const
 {
 	int safe_point_index = -1;
-
-	if (findAssociatedSafePointIndex(rtl_position, home_altitude_amsl, safe_point_index)) {
-		return readVtolLandApproach(safe_point_index, home_altitude_amsl);
-	}
-
-	return {};
-}
-
-bool MissionRoutePlanner::Provider::hasVtolLandApproach(const PositionYawSetpoint &rtl_position, float home_altitude_amsl) const
-{
-	int safe_point_index = -1;
-
-	return findAssociatedSafePointIndex(rtl_position, home_altitude_amsl, safe_point_index)
-	       && hasVtolLandApproach(safe_point_index, home_altitude_amsl);
-}
-
-bool MissionRoutePlanner::Provider::hasVtolLandApproach(int safe_point_index, float home_altitude_amsl) const
-{
 	mission_item_s safe_point_item{};
 
-	if (!loadSafePointItem(safe_point_index, safe_point_item)) {
-		return false;
+	if (!findAssociatedSafePointIndex(rtl_position, home_altitude_amsl, safe_point_index, safe_point_item)) {
+		return {};
 	}
 
-	MissionRoutePlanner::Position ignored_safe_point_position{};
+	land_approaches_s vtol_land_approaches{};
+	vtol_land_approaches.land_location_lat_lon = matrix::Vector2d(safe_point_item.lat, safe_point_item.lon);
+	scanVtolLandApproachBlock(safe_point_index, home_altitude_amsl, &vtol_land_approaches);
+	return vtol_land_approaches;
+}
 
-	if (!MissionRoutePlanner::extractValidSafePointPosition(safe_point_item, home_altitude_amsl,
-			ignored_safe_point_position)) {
-		return false;
-	}
+bool MissionRoutePlanner::Provider::hasVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position,
+		float home_altitude_amsl) const
+{
+	int safe_point_index = -1;
+	mission_item_s safe_point_item{};
 
-	return hasValidVtolLandApproachInBlock(safe_point_index, home_altitude_amsl);
+	return findAssociatedSafePointIndex(rtl_position, home_altitude_amsl, safe_point_index, safe_point_item)
+	       && hasVtolLandApproachesAtSafePointIndex(safe_point_index, home_altitude_amsl);
+}
+
+bool MissionRoutePlanner::Provider::hasVtolLandApproachesAtSafePointIndex(int safe_point_index,
+		float home_altitude_amsl) const
+{
+	return scanVtolLandApproachBlock(safe_point_index, home_altitude_amsl, nullptr);
 }
 
 bool MissionRoutePlanner::Provider::anySafePointHasVtolLandApproach(float home_altitude_amsl) const
 {
-	for (int safe_point_index = 0; safe_point_index < safePointCount(); ++safe_point_index) {
-		if (hasVtolLandApproach(safe_point_index, home_altitude_amsl)) {
+	const int safe_point_count = safePointCount();
+
+	for (int safe_point_index = 0; safe_point_index < safe_point_count; ++safe_point_index) {
+		mission_item_s safe_point_item{};
+
+		// Only rally points with a valid position can anchor a landing-approach block.
+		if (!loadSafePointItem(safe_point_index, safe_point_item)
+		    || safe_point_item.nav_cmd != NAV_CMD_RALLY_POINT) {
+			continue;
+		}
+
+		MissionRoutePlanner::Position safe_point_position{};
+
+		if (!MissionRoutePlanner::extractValidSafePointPosition(safe_point_item, home_altitude_amsl, safe_point_position)) {
+			continue;
+		}
+
+		if (hasVtolLandApproachesAtSafePointIndex(safe_point_index, home_altitude_amsl)) {
 			return true;
 		}
 	}
@@ -440,7 +409,7 @@ void MissionRoutePlanner::loadSafePointBatch(const Config &config, SafePointBatc
 		}
 
 		if (config.state.require_vtol_approach
-		    && !_provider.hasVtolLandApproach(safe_point_index, config.parameters.home_altitude_amsl)) {
+		    && !_provider.hasVtolLandApproachesAtSafePointIndex(safe_point_index, config.parameters.home_altitude_amsl)) {
 			PX4_DEBUG("RTL safe point %d skipped, no VTOL approach", safe_point_index);
 			continue;
 		}
