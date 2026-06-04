@@ -51,7 +51,7 @@
  * @author Jonas Perolini <jonspero@me.com>
  */
 
-#include "test_RTL_helpers.h"
+#include "support/mission_route_test_helpers.h"
 #include "test_RTL_data.h"
 
 

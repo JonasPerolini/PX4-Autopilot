@@ -461,8 +461,9 @@ public:
 		void collectVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl, land_approaches_s &vtol_land_approaches) const;
 		/** @brief Return whether the rally block following one safe point contains a valid landing approach. */
 		bool hasValidVtolLandApproachInBlock(int safe_point_index, float home_altitude_amsl) const;
-		/** @brief Find the safe point whose lat/lon is close to the rtl_position. */
-		bool findAssociatedSafePointIndex(const PositionYawSetpoint &rtl_position, int &safe_point_index) const;
+		/** @brief Find the valid safe point whose lat/lon is close to the rtl_position. */
+		bool findAssociatedSafePointIndex(const PositionYawSetpoint &rtl_position, float home_altitude_amsl,
+						  int &safe_point_index) const;
 	};
 
 	explicit MissionRoutePlanner(const Provider &provider) : _provider(provider) {}

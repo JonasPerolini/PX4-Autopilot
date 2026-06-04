@@ -51,8 +51,10 @@
 #include <drivers/drv_hrt.h>
 #include <lib/geo/geo.h>
 #include <px4_platform_common/log.h>
+#include <uORB/topics/vtol_vehicle_status.h>
 
 #include <inttypes.h>
+#include <cmath>
 #include <vector>
 
 using namespace time_literals;
@@ -144,10 +146,50 @@ static inline mission_item_s makeLandItemFromOffset(double base_lat, double base
 	return makePositionItemFromOffset(base_lat, base_lon, north_m, east_m, alt, NAV_CMD_LAND, false);
 }
 
+static inline mission_item_s makeTakeoffItem(double lat, double lon, float alt)
+{
+	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_TAKEOFF);
+	item.autocontinue = false;
+	return item;
+}
+
+static inline mission_item_s makeLandItem(double lat, double lon, float alt)
+{
+	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_LAND);
+	item.autocontinue = false;
+	return item;
+}
+
+static inline mission_item_s makeDoJump(int16_t jump_target_index, uint16_t repeat_count,
+					uint16_t current_count = 0)
+{
+	mission_item_s item{};
+	item.nav_cmd = NAV_CMD_DO_JUMP;
+	item.do_jump_mission_index = jump_target_index;
+	item.do_jump_repeat_count = repeat_count;
+	item.do_jump_current_count = current_count;
+	return item;
+}
+
+static inline mission_item_s makeVtolTransitionItem(uint8_t target_state)
+{
+	mission_item_s item{};
+	item.nav_cmd = NAV_CMD_DO_VTOL_TRANSITION;
+	item.params[0] = static_cast<float>(target_state);
+	return item;
+}
+
 static inline mission_item_s makeSafePointFromOffset(double base_lat, double base_lon,
 		float north_m, float east_m, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
 {
 	mission_item_s item = makePositionItemFromOffset(base_lat, base_lon, north_m, east_m, alt, NAV_CMD_RALLY_POINT);
+	item.frame = frame;
+	return item;
+}
+
+static inline mission_item_s makeSafePointAbsolute(double lat, double lon, float alt, uint8_t frame = NAV_FRAME_GLOBAL)
+{
+	mission_item_s item = makePositionItem(lat, lon, alt, NAV_CMD_RALLY_POINT);
 	item.frame = frame;
 	return item;
 }
@@ -161,6 +203,30 @@ static inline MissionRoutePlanner::Position makePositionFromOffset(double base_l
 	return position;
 }
 
+static inline MissionRoutePlanner::Position makePositionAbsolute(double lat, double lon, float alt)
+{
+	return MissionRoutePlanner::Position{lat, lon, alt};
+}
+
+static inline MissionRoutePlanner::Config defaultConfig()
+{
+	MissionRoutePlanner::Config config{};
+	config.parameters.vehicle_projection_search_dist = 60.f;
+	config.parameters.safe_point_projection_search_dist = 60.f;
+	config.parameters.acceptance_radius = 10.f;
+	config.parameters.direct_acceptance_radius = 10.f;
+	config.parameters.home_altitude_amsl = 500.f;
+	return config;
+}
+
+static inline MissionRoutePlanner::Config fwConfig()
+{
+	MissionRoutePlanner::Config config = defaultConfig();
+	config.state.is_fixed_wing = true;
+	config.parameters.u_turn_penalty_m = 4000.f;
+	return config;
+}
+
 namespace route_test_reference
 {
 static constexpr double kBaseLat = 47.397742;
@@ -169,6 +235,27 @@ static constexpr float kAlt = 500.f;
 }
 
 } // namespace navigator_test
+
+using VectorProvider = navigator_test::VectorMissionRouteProvider;
+using navigator_test::makeDoJump;
+using navigator_test::makeLandItem;
+using navigator_test::makeLandItemFromOffset;
+using navigator_test::makePositionAbsolute;
+using navigator_test::makePositionFromOffset;
+using navigator_test::makePositionItem;
+using navigator_test::makePositionItemFromOffset;
+using navigator_test::makeSafePointAbsolute;
+using navigator_test::makeSafePointFromOffset;
+using navigator_test::makeTakeoffItem;
+using navigator_test::makeTakeoffItemFromOffset;
+using navigator_test::makeVtolTransitionItem;
+using navigator_test::defaultConfig;
+using navigator_test::fwConfig;
+namespace rtl_test_reference = navigator_test::route_test_reference;
+
+static constexpr double kLatLonToleranceDeg = 1e-7;     // ~1 cm at equator
+static constexpr float kAltitudeTolerance = 2.0f;       // meters
+static constexpr float kDistanceTolerance = 5.0f;       // meters
 
 class DatamanClientTestPeer
 {
@@ -209,6 +296,14 @@ public:
 		client.update();
 		return client._state != DatamanClient::State::RequestSent;
 	}
+};
+
+class MissionRoutePlannerTestBase : public ::testing::Test
+{
+protected:
+	MissionRoutePlanner::Config config = defaultConfig();
+	MissionRoutePlanner::ProjectionContext ctx{};
+	MissionRoutePlanner::FailureReason reason{};
 };
 
 class DatamanCacheTestPeer

@@ -176,7 +176,7 @@ private:
 	 * @brief Find RTL destination if only safe points are considered
 	 *
 	 */
-	PositionYawSetpoint findClosestSafePoint(float min_dist, uint8_t &safe_point_index);
+	PositionYawSetpoint findClosestSafePoint(float min_dist, uint8_t &safe_point_index, int rtl_type);
 
 	/**
 	 * @brief Set the position of the land start marker in the planned mission as destination.
@@ -215,26 +215,6 @@ private:
 	void parameters_update();
 
 	/**
-	 * @brief Read the landing-approach block associated with the first valid rally point near rtl_position.
-	 *
-	 * A block starts at the associated rally point and contains the consecutive NAV_CMD_LOITER_TO_ALT
-	 * items that follow it. The next rally point starts a new block.
-	 * Invalid rally points are skipped so a later nearby valid rally point can still be considered.
-	 */
-	land_approaches_s getVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position,
-			float home_altitude_amsl) const;
-
-	/**
-	 * @brief Return whether a valid associated block near rtl_position has at least one valid approach.
-	 */
-	bool hasVtolLandApproachesNearLocation(const PositionYawSetpoint &rtl_position, float home_altitude_amsl) const;
-
-	/**
-	 * @brief Return whether the block after safe_point_index contains at least one valid approach.
-	 */
-	bool hasVtolLandApproachesAtSafePointIndex(int safe_point_index, float home_altitude_amsl) const;
-
-	/**
 	 * @brief Choose the most wind-aligned approach in a landing-approach block.
 	 *
 	 * Bearings are evaluated from the block's land location.
@@ -245,42 +225,6 @@ private:
 	 * @brief Return the wind-selected VTOL approach for destination, or an invalid loiter if none exists.
 	 */
 	loiter_point_s selectLandingApproach(const PositionYawSetpoint &destination) const;
-
-	/**
-	 * @brief Find the first rally point whose block should be associated with rtl_position.
-	 *
-	 * Invalid rally points are skipped so nearby valid fallbacks can still be associated.
-	 * On success, safe_point_index and safe_point_item are populated with the rally point that starts the block.
-	 */
-	bool findAssociatedSafePointIndex(const PositionYawSetpoint &rtl_position, float home_altitude_amsl,
-					  int &safe_point_index, mission_item_s &safe_point_item) const;
-
-	/**
-	 * @brief Scan one landing-approach block after a rally point.
-	 *
-	 * A block is the consecutive NAV_CMD_LOITER_TO_ALT items after safe_point_index.
-	 * Scanning stops at the next rally point because it starts a different safe-point block.
-	 *
-	 * If result is non-null, all valid approaches are collected into it.
-	 * If result is null, returns true on the first valid approach (early exit).
-	 *
-	 * @return true if at least one valid approach was found.
-	 */
-	bool scanVtolLandApproachBlock(int safe_point_index, float home_altitude_amsl,
-				       land_approaches_s *result) const;
-
-	/**
-	 * @brief Convert one loiter mission item into a landing-approach entry.
-	 */
-	loiter_point_s makeVtolLandApproachPoint(const mission_item_s &mission_item, float home_altitude_amsl) const;
-
-	enum class DatamanState {
-		UpdateRequestWait,
-		Read,
-		ReadWait,
-		Load,
-		Error
-	};
 
 	hrt_abstime _destination_check_time{0};
 
@@ -302,7 +246,7 @@ private:
 	bool _enforce_rtl_alt{false};
 	// The planner cannot infer direction from mission_index alone when the vehicle is near a shared waypoint:
 	// the same target index can mean "arriving from ahead" or "arriving from behind".
-	// Keep the last chosen route direction as a continuity hint for the next type-6 planning pass.
+	// Keep the last chosen route direction as a continuity hint for the next type-7 planning pass.
 	bool _route_safe_point_direction_reversed{false};
 	MissionRoutePlanner::Segment _last_route_safe_point_loop_segment{};
 

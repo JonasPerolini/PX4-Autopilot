@@ -45,7 +45,7 @@
 
 #include "navigator.h"
 #include "rtl_mission_safe_point_follow.h"
-#include "test_RTL_helpers.h"
+#include "support/mission_route_test_helpers.h"
 
 #include <drivers/drv_hrt.h>
 #include <uORB/Publication.hpp>

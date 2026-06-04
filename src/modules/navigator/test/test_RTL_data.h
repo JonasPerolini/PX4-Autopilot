@@ -50,7 +50,7 @@
 
 #pragma once
 
-#include "test_RTL_helpers.h"
+#include "support/mission_route_test_helpers.h"
 
 #include <uORB/topics/vtol_vehicle_status.h>
 #include <vector>
