@@ -39,7 +39,9 @@ namespace mission_route
 {
 
 struct Position;
+struct ProjectionReference;
 struct ProjectionReferenceBatch;
+struct RouteProjectionCandidate;
 
 /**
  * Geofence checks used by the planner. This interface lets tests and offline tools
@@ -55,6 +57,19 @@ public:
 	 * Discarded candidates are not replaced. Return false if checks are unavailable.
 	 */
 	virtual bool pruneCandidates(ProjectionReferenceBatch &batch) const = 0;
+
+	/**
+	 * Check that segments may start at this reference, the first rule of pruneCandidates().
+	 * Return false if unavailable; otherwise clear says whether it passes.
+	 */
+	virtual bool checkReference(const ProjectionReference &reference, bool &clear) const = 0;
+
+	/**
+	 * Check one candidate of a reference that passed checkReference(), with the other rules of pruneCandidates().
+	 * Return false if unavailable; otherwise clear says whether it passes.
+	 */
+	virtual bool checkCandidate(const ProjectionReference &reference, const RouteProjectionCandidate &candidate,
+				    bool &clear) const = 0;
 
 	/** Check one segment. Return false if unavailable; otherwise clear says whether it passes. */
 	virtual bool checkPath(const Position &start, const Position &end, bool &clear) const = 0;
@@ -75,9 +90,15 @@ public:
 	GeofencePathChecker(Geofence &geofence, const Position &vehicle_position);
 
 	bool pruneCandidates(ProjectionReferenceBatch &batch) const override;
+	bool checkReference(const ProjectionReference &reference, bool &clear) const override;
+	bool checkCandidate(const ProjectionReference &reference, const RouteProjectionCandidate &candidate,
+			    bool &clear) const override;
 	bool checkPath(const Position &start, const Position &end, bool &clear) const override;
 
 private:
+	bool checkEndAndPath(const Position &start, const Position &end, bool &clear) const;
+	bool exempt(const ProjectionReference &reference) const;
+	bool referenceAllowed(const ProjectionReference &reference) const;
 	bool withinScalarLimits(const Position &position) const;
 
 	Geofence &_geofence;

@@ -32,8 +32,10 @@
  ****************************************************************************/
 
 #include "mission_route_geofence.h"
+#include "mission_route_planner.h"
 #include "mission_route_projection.h"
 #include "support/geofence_test_helpers.h"
+#include "support/mission_route_test_helpers.h"
 
 using mission_route::GeofencePathChecker;
 using mission_route::Position;
@@ -67,6 +69,50 @@ protected:
 		auto &candidate = reference.candidate_buffer.candidates[reference.candidate_buffer.count++];
 		candidate.projection = projection;
 		candidate.segment.start.idx = tag;
+	}
+
+	mission_item_s routeItem(float north, float east, uint16_t nav_cmd = NAV_CMD_WAYPOINT) const
+	{
+		const Position at = routePosition(north, east);
+		return makePositionItem(at.lat, at.lon, at.alt, nav_cmd);
+	}
+
+	// Multicopter defaults: 30 m search margins (MIS_MC_SEG_DIST, RTL_RP_SEG_DIST).
+	mission_route::RtlRouteRequest rtlRequest(const Position &vehicle, int32_t mission_index) const
+	{
+		mission_route::RtlRouteRequest request{};
+		request.vehicle_position = vehicle;
+		request.mission_index = mission_index;
+		request.home_altitude_amsl = kAltitude - 100.f;
+		request.projection_search_distance_m = 30.f;
+		request.safe_point_projection_search_distance_m = 30.f;
+		request.acceptance_radius_m = 10.f;
+		request.direct_goal_acceptance_radius_m = 10.f;
+		request.altitude_acceptance_radius_m = 10.f;
+		return request;
+	}
+
+	// Rectangle A(0, 0) B(600, 0) C(600, 200) D(0, 200), with a box beside leg C-D that no leg crosses.
+	std::vector<mission_item_s> rectangleMission(uint16_t last_nav_cmd = NAV_CMD_WAYPOINT) const
+	{
+		return {routeItem(0.f, 0.f), routeItem(600.f, 0.f), routeItem(600.f, 200.f), routeItem(0.f, 200.f, last_nav_cmd)};
+	}
+
+	FencePoints boxBesideLegCD() const
+	{
+		return polygon(false, {{250.f, 160.f}, {350.f, 160.f}, {350.f, 190.f}, {250.f, 190.f}});
+	}
+
+	mission_item_s safePointItem(float north, float east) const
+	{
+		const Position at = routePosition(north, east);
+		return makeSafePointAbsolute(at.lat, at.lon, at.alt);
+	}
+
+	// A thin wall 4 m east of a safe point at (300, 100): it blocks the legs east of the safe point.
+	FencePoints wallEastOfSafePoint() const
+	{
+		return polygon(false, {{290.f, 104.f}, {310.f, 104.f}, {310.f, 106.f}, {290.f, 106.f}});
 	}
 };
 
@@ -311,4 +357,183 @@ TEST_F(MissionRouteGeofenceTest, ExistingBreachSkipsOnlyVehicleSegments)
 	_fence.updateFence();
 	EXPECT_FALSE(recovery.checkPath(vehicle, routePosition(0.f, 100.f), clear));
 	EXPECT_FALSE(clear);
+}
+
+// The rescan checks a reference once and then each of its candidates: together they must agree with the prune,
+// for every fence type and limit, and recovery exempts only the vehicle.
+TEST_F(MissionRouteGeofenceTest, ReferenceAndCandidateChecksAgreeWithPrune)
+{
+	struct FenceCase {
+		const char *name;
+		FencePoints points;
+		float max_horizontal_distance;
+	};
+
+	const FenceCase fence_cases[] {
+		{"exclusion polygon", exclusionSquare(), 0.f},
+		{"inclusion polygon", polygon(true, {{-250.f, -250.f}, {250.f, -250.f}, {250.f, 400.f}, {-250.f, 400.f}}), 0.f},
+		{"exclusion circle", circle(false, {0.f, 300.f}, 60.f), 0.f},
+		{"inclusion circle", circle(true, {0.f, 150.f}, 300.f), 0.f},
+		{"maximum distance", {}, 400.f},
+	};
+	// Each fence case has spots outside the allowed area, where the vehicle is recovering.
+	const Position spots[] {routePosition(0.f, 100.f), routePosition(100.f, 100.f), routePosition(0.f, 300.f),
+				routePosition(0.f, 500.f), routePosition(-300.f, 0.f)
+			       };
+	unsigned clear_count = 0;
+	unsigned blocked_count = 0;
+
+	for (const FenceCase &fence_case : fence_cases) {
+		SCOPED_TRACE(fence_case.name);
+		ASSERT_EQ(param_set(param_find("GF_MAX_HOR_DIST"), &fence_case.max_horizontal_distance), PX4_OK);
+		_navigator.updateParams();
+		ASSERT_TRUE(loadFence(fence_case.points));
+
+		for (size_t spot = 0; spot < 5; ++spot) {
+			SCOPED_TRACE(::testing::Message() << "vehicle at spot " << spot);
+			const GeofencePathChecker checker{_fence, spots[spot]};
+			ProjectionReferenceBatch batch{};
+			batch.count = 2;
+			batch.items[0].position = spots[spot];
+			batch.items[1].position = spots[(spot + 1) % 5];
+			batch.items[1].source_index = 0;
+			bool clear[2][3] {};
+
+			for (uint8_t i = 0; i < batch.count; ++i) {
+				bool reference_clear = false;
+				ASSERT_TRUE(checker.checkReference(batch.items[i], reference_clear));
+
+				for (uint8_t j = 0; j < 3; ++j) {
+					addCandidate(batch.items[i], spots[(spot + 2 + j) % 5], j);
+					bool candidate_clear = false;
+					ASSERT_TRUE(checker.checkCandidate(batch.items[i], batch.items[i].candidate_buffer.candidates[j],
+									   candidate_clear));
+					clear[i][j] = reference_clear && candidate_clear;
+					clear_count += clear[i][j];
+					blocked_count += !clear[i][j];
+				}
+			}
+
+			ASSERT_TRUE(checker.pruneCandidates(batch));
+
+			for (uint8_t i = 0; i < batch.count; ++i) {
+				const auto &candidates = batch.items[i].candidate_buffer;
+				bool kept[3] {};
+
+				for (uint8_t k = 0; k < candidates.count; ++k) {
+					kept[candidates.candidates[k].segment.start.idx] = true;
+				}
+
+				for (uint8_t j = 0; j < 3; ++j) {
+					EXPECT_EQ(kept[j], clear[i][j]) << "reference " << int(i) << ", candidate " << int(j);
+				}
+			}
+		}
+	}
+
+	EXPECT_GT(clear_count, 0u);
+	EXPECT_GT(blocked_count, 0u);
+}
+
+// Leg C-D is the safe point's closest leg, but its branch-off leg crosses the box. It must not narrow the
+// window and hide leg A-B, clear 150 m away: the plan failed, or with a LAND at D landed there.
+TEST_F(MissionRouteGeofenceTest, BlockedClosestLegDoesNotHideClearSafePointBranchOff)
+{
+	ASSERT_TRUE(loadFence(boxBesideLegCD()));
+	const Position vehicle = routePosition(100.f, 0.f);
+	const GeofencePathChecker checker{_fence, vehicle};
+
+	for (const bool land_at_d : {false, true}) {
+		SCOPED_TRACE(::testing::Message() << "land at D " << land_at_d);
+		const auto provider = makeRouteProvider(rectangleMission(land_at_d ? NAV_CMD_LAND : NAV_CMD_WAYPOINT),
+		{safePointItem(300.f, 150.f)});
+		MissionRoutePlanner planner{provider, &checker};
+		mission_route::RtlRouteRequest request = rtlRequest(vehicle, 1);
+		request.mission_land_index = land_at_d ? 3 : -1;
+		mission_route::RtlRoutePlan plan{};
+
+		const mission_route::FailureReason status = planner.planRtlRoute(request, plan);
+
+		ASSERT_EQ(status, mission_route::FailureReason::kNone) << mission_route::failureReasonString(status);
+		EXPECT_EQ(plan.goal_type, mission_route::GoalType::kSafePoint);
+		EXPECT_EQ(plan.safe_point_index, 0);
+		EXPECT_FALSE(plan.direction_reversed);
+		EXPECT_EQ(plan.branch_off_mission_item_index, 1);
+	}
+}
+
+// After a GoTo, the vehicle's closest leg is C-D behind the box. It must not narrow the window and hide leg A-B,
+// clear 150 m away: smart rejoin and Return both had no route.
+TEST_F(MissionRouteGeofenceTest, BlockedClosestLegDoesNotHideClearBranchIn)
+{
+	ASSERT_TRUE(loadFence(boxBesideLegCD()));
+	const Position vehicle = routePosition(300.f, 150.f);
+	const GeofencePathChecker checker{_fence, vehicle};
+	const auto provider = makeRouteProvider(rectangleMission(), {safePointItem(0.f, -50.f)});
+	MissionRoutePlanner planner{provider, &checker};
+	const mission_route::RtlRouteRequest request = rtlRequest(vehicle, 1);
+
+	mission_route::MissionResumePlan join{};
+	const mission_route::FailureReason join_status = planner.planMissionResumeJoin(request, join);
+	ASSERT_EQ(join_status, mission_route::FailureReason::kNone) << mission_route::failureReasonString(join_status);
+	EXPECT_EQ(join.first_mission_item_index, 1);
+
+	mission_route::RtlRoutePlan plan{};
+	const mission_route::FailureReason status = planner.planRtlRoute(request, plan);
+	ASSERT_EQ(status, mission_route::FailureReason::kNone) << mission_route::failureReasonString(status);
+	EXPECT_EQ(plan.goal_type, mission_route::GoalType::kSafePoint);
+	EXPECT_TRUE(plan.direction_reversed);
+	EXPECT_EQ(plan.first_mission_item_index, 0);
+	EXPECT_EQ(plan.branch_off_mission_item_index, 0);
+}
+
+// The closest leg is blocked, but a leg 30 m away passes inside the first window. The rescan must widen the window
+// to the leg the vehicle flies, 50 m away and cheaper; rescanning only empty buffers would miss it.
+TEST_F(MissionRouteGeofenceTest, BlockedClosestLegDoesNotHideCheaperLegBeyondSurvivor)
+{
+	ASSERT_TRUE(loadFence(wallEastOfSafePoint()));
+	const std::vector<mission_item_s> mission{
+		routeItem(0.f, 50.f), routeItem(600.f, 50.f),   // flown, 50 m from the safe point
+		routeItem(600.f, 2000.f), routeItem(0.f, 2000.f),
+		routeItem(0.f, 70.f), routeItem(600.f, 70.f),   // 30 m
+		routeItem(600.f, 110.f), routeItem(0.f, 110.f), // 10 m, behind the wall
+	};
+	const Position vehicle = routePosition(100.f, 45.f);
+	const GeofencePathChecker checker{_fence, vehicle};
+	const auto provider = makeRouteProvider(mission, {safePointItem(300.f, 100.f)});
+	MissionRoutePlanner planner{provider, &checker};
+	mission_route::RtlRoutePlan plan{};
+
+	const mission_route::FailureReason status = planner.planRtlRoute(rtlRequest(vehicle, 1), plan);
+
+	ASSERT_EQ(status, mission_route::FailureReason::kNone) << mission_route::failureReasonString(status);
+	EXPECT_EQ(plan.goal_type, mission_route::GoalType::kSafePoint);
+	EXPECT_FALSE(plan.direction_reversed);
+	EXPECT_EQ(plan.branch_off_mission_item_index, 1);
+}
+
+// The closest leg passes, but two blocked legs fill the three places and push out the leg the vehicle flies,
+// 25 m away and cheaper. A full buffer that loses candidates to the prune is rescanned, which finds it again.
+TEST_F(MissionRouteGeofenceTest, BlockedLegsInFullBufferDoNotPushOutCheaperLeg)
+{
+	ASSERT_TRUE(loadFence(wallEastOfSafePoint()));
+	const std::vector<mission_item_s> mission{
+		routeItem(0.f, 75.f), routeItem(600.f, 75.f),   // flown, 25 m from the safe point
+		routeItem(600.f, 2000.f), routeItem(0.f, 2000.f),
+		routeItem(0.f, 90.f), routeItem(600.f, 90.f),   // 10 m
+		routeItem(600.f, 115.f), routeItem(0.f, 115.f), // 15 m, behind the wall
+		routeItem(0.f, 120.f), routeItem(600.f, 120.f), // 20 m, behind the wall
+	};
+	const Position vehicle = routePosition(100.f, 75.f);
+	const GeofencePathChecker checker{_fence, vehicle};
+	const auto provider = makeRouteProvider(mission, {safePointItem(300.f, 100.f)});
+	MissionRoutePlanner planner{provider, &checker};
+	mission_route::RtlRoutePlan plan{};
+
+	const mission_route::FailureReason status = planner.planRtlRoute(rtlRequest(vehicle, 1), plan);
+
+	ASSERT_EQ(status, mission_route::FailureReason::kNone) << mission_route::failureReasonString(status);
+	EXPECT_EQ(plan.goal_type, mission_route::GoalType::kSafePoint);
+	EXPECT_FALSE(plan.direction_reversed);
+	EXPECT_EQ(plan.branch_off_mission_item_index, 1);
 }

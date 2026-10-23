@@ -97,6 +97,19 @@ GeofencePathChecker::GeofencePathChecker(Geofence &geofence, const Position &veh
 {
 }
 
+// Recovery only exempts the vehicle reference; safe point segments are still checked.
+bool GeofencePathChecker::exempt(const ProjectionReference &reference) const
+{
+	return _recovering && reference.source_index < 0;
+}
+
+// A segment entirely inside an exclusion area would cross no boundary, so its start must be allowed too.
+bool GeofencePathChecker::referenceAllowed(const ProjectionReference &reference) const
+{
+	const Position &position = reference.position;
+	return position.valid() && _geofence.checkPointAgainstAllGeofences(position.lat, position.lon, position.alt);
+}
+
 bool GeofencePathChecker::withinScalarLimits(const Position &position) const
 {
 	return position.valid()
@@ -133,16 +146,13 @@ bool GeofencePathChecker::pruneCandidates(ProjectionReferenceBatch &batch) const
 		const ProjectionReference &reference = batch.items[i];
 		const Position &anchor = reference.position;
 
-		// Recovery only exempts the vehicle reference; safe point segments are still checked.
-		if (_recovering && reference.source_index < 0) {
+		if (exempt(reference)) {
 			shared_paths.valid_masks[i] = static_cast<uint8_t>((1U << reference.candidate_buffer.count) - 1U);
 			continue;
 		}
 
 		// First check that this vehicle or safe point is in an allowed area.
-		// A segment entirely inside an exclusion area would cross no boundary.
-		if (reference.candidate_buffer.count == 0 || !anchor.valid()
-		    || !_geofence.checkPointAgainstAllGeofences(anchor.lat, anchor.lon, anchor.alt)) {
+		if (reference.candidate_buffer.count == 0 || !referenceAllowed(reference)) {
 			continue;
 		}
 
@@ -195,6 +205,36 @@ bool GeofencePathChecker::pruneCandidates(ProjectionReferenceBatch &batch) const
 	return true;
 }
 
+bool GeofencePathChecker::checkReference(const ProjectionReference &reference, bool &clear) const
+{
+	clear = false;
+
+	if (!_geofence.isReadyForPathChecks()) {
+		return false;
+	}
+
+	clear = exempt(reference) || referenceAllowed(reference);
+	return true;
+}
+
+bool GeofencePathChecker::checkCandidate(const ProjectionReference &reference,
+		const RouteProjectionCandidate &candidate, bool &clear) const
+{
+	clear = false;
+
+	if (!_geofence.isReadyForPathChecks()) {
+		return false;
+	}
+
+	// The same rules and order as for one candidate in pruneCandidates().
+	if (exempt(reference)) {
+		clear = true;
+		return true;
+	}
+
+	return checkEndAndPath(reference.position, candidate.projection, clear);
+}
+
 bool GeofencePathChecker::checkPath(const Position &start, const Position &end, bool &clear) const
 {
 	clear = false;
@@ -212,7 +252,17 @@ bool GeofencePathChecker::checkPath(const Position &start, const Position &end, 
 		return true;
 	}
 
-	if (!_geofence.checkPointAgainstAllGeofences(start.lat, start.lon, start.alt) || !withinScalarLimits(end)) {
+	if (!_geofence.checkPointAgainstAllGeofences(start.lat, start.lon, start.alt)) {
+		return true;
+	}
+
+	return checkEndAndPath(start, end, clear);
+}
+
+// The end point limits, then the horizontal path, from a start that passed its own checks.
+bool GeofencePathChecker::checkEndAndPath(const Position &start, const Position &end, bool &clear) const
+{
+	if (!withinScalarLimits(end)) {
 		return true;
 	}
 

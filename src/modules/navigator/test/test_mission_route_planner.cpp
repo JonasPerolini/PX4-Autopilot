@@ -61,6 +61,7 @@ public:
 	candidate_clear = [](const auto &, const auto &) { return true; };
 	std::function<bool(const mission_route::ProjectionReferenceBatch &)>
 	batch_available = [](const auto &) { return true; };
+	bool candidate_available{true};
 	bool path_available{true};
 	bool path_clear{true};
 	mutable std::vector<unsigned> batch_sizes;
@@ -91,6 +92,19 @@ public:
 		}
 
 		return true;
+	}
+
+	bool checkReference(const mission_route::ProjectionReference &, bool &clear) const override
+	{
+		clear = true;
+		return true;
+	}
+
+	bool checkCandidate(const mission_route::ProjectionReference &reference,
+			    const mission_route::RouteProjectionCandidate &candidate, bool &clear) const override
+	{
+		clear = candidate_available && candidate_clear(reference, candidate);
+		return candidate_available;
 	}
 
 	bool checkPath(const mission_route::Position &start, const mission_route::Position &end, bool &clear) const override
@@ -256,7 +270,8 @@ TEST_F(MissionRoutePlannerTest, GeofencePrunesVehicleCandidatesBeforeContinuityS
 	}
 }
 
-TEST_F(MissionRoutePlannerTest, GeofenceRejectsAllVehicleCandidatesWithoutRescanning)
+// The prune removed the closest candidate, so the route is scanned once more, checking each candidate.
+TEST_F(MissionRoutePlannerTest, GeofenceRejectsAllVehicleCandidatesAfterOneRescan)
 {
 	const std::vector<mission_item_s> mission{
 		makeTakeoffItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
@@ -275,7 +290,7 @@ TEST_F(MissionRoutePlannerTest, GeofenceRejectsAllVehicleCandidatesWithoutRescan
 	MissionRoutePlanner planner{provider, &checker};
 	EXPECT_EQ(planner.planMissionResumeJoin(request, plan), mission_route::FailureReason::kNoValidCandidateFound);
 	EXPECT_FALSE(plan.valid());
-	EXPECT_LE(provider.missionLoadCount(), baseline_provider.missionLoadCount());
+	EXPECT_LE(provider.missionLoadCount(), 2 * baseline_provider.missionLoadCount());
 
 	auto rtl_request = makeRtlRouteRequest(request.vehicle_position, 1);
 	rtl_request.mission_land_index = 2;
@@ -291,22 +306,30 @@ TEST_F(MissionRoutePlannerTest, UnavailableGeofenceRejectsVehicleJoinForMissionA
 		makeLandItemFromOffset(kBaseLat, kBaseLon, 200.f, 0.f, kAlt),
 	};
 	VectorProvider provider = makeRouteProvider(mission, {});
-	RecordingPathChecker checker;
-	checker.batch_available = [](const auto &) { return false; };
-	MissionRoutePlanner planner{provider, &checker};
-	mission_route::MissionResumePlan mission_plan{};
-	EXPECT_EQ(planner.planMissionResumeJoin(makeMissionResumeRequest(vehicleOnFirstSegment(), 1), mission_plan),
-		  mission_route::FailureReason::kGeofenceUnavailable);
-	EXPECT_FALSE(mission_plan.valid());
 
-	auto request = makeRtlRouteRequest(vehicleOnFirstSegment(), 1);
-	request.mission_land_index = 1;
-	mission_route::RtlRoutePlan rtl_plan{};
-	EXPECT_EQ(planner.planRtlRoute(request, rtl_plan), mission_route::FailureReason::kGeofenceUnavailable);
-	EXPECT_FALSE(rtl_plan.valid());
+	// Unavailable in the batched prune, or in the rescan that follows when the prune removed the closest candidate.
+	for (const bool candidate_check : {false, true}) {
+		SCOPED_TRACE(::testing::Message() << "candidate check " << candidate_check);
+		RecordingPathChecker checker;
+		checker.batch_available = [candidate_check](const auto &) { return candidate_check; };
+		checker.candidate_clear = [candidate_check](const auto &, const auto &) { return !candidate_check; };
+		checker.candidate_available = !candidate_check;
+		MissionRoutePlanner planner{provider, &checker};
+		mission_route::MissionResumePlan mission_plan{};
+		EXPECT_EQ(planner.planMissionResumeJoin(makeMissionResumeRequest(vehicleOnFirstSegment(), 1), mission_plan),
+			  mission_route::FailureReason::kGeofenceUnavailable);
+		EXPECT_FALSE(mission_plan.valid());
+
+		auto request = makeRtlRouteRequest(vehicleOnFirstSegment(), 1);
+		request.mission_land_index = 1;
+		mission_route::RtlRoutePlan rtl_plan{};
+		EXPECT_EQ(planner.planRtlRoute(request, rtl_plan), mission_route::FailureReason::kGeofenceUnavailable);
+		EXPECT_FALSE(rtl_plan.valid());
+	}
 }
 
-TEST_F(MissionRoutePlannerTest, GeofencePrunesCheaperSafePointsAcrossBatchesWithoutExtraMissionReads)
+// Only the batch whose closest candidates the prune removed is scanned again.
+TEST_F(MissionRoutePlannerTest, GeofencePrunesCheaperSafePointsAcrossBatchesWithOneRescan)
 {
 	const std::vector<mission_item_s> mission{
 		makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kAlt),
@@ -338,7 +361,7 @@ TEST_F(MissionRoutePlannerTest, GeofencePrunesCheaperSafePointsAcrossBatchesWith
 	EXPECT_EQ(plan.goal_type, mission_route::GoalType::kSafePoint);
 	EXPECT_EQ(plan.safe_point_index, kSafePointBatchSize);
 	EXPECT_EQ(checker.batch_sizes, std::vector<unsigned>({1, kSafePointBatchSize, 1}));
-	EXPECT_LE(provider.missionLoadCount(), baseline_provider.missionLoadCount());
+	EXPECT_LE(provider.missionLoadCount(), baseline_provider.missionLoadCount() + static_cast<int>(mission.size()));
 }
 
 TEST_F(MissionRoutePlannerTest, GeofenceBlockedSafePointsFallBackToMissionLand)
