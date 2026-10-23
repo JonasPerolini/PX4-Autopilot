@@ -43,6 +43,8 @@
 #include "support/mission_route_test_helpers.h"
 #include "test_mission_route_data.h"
 
+#include <cinttypes>
+#include <cstdio>
 #include <functional>
 #include <random>
 
@@ -2274,4 +2276,220 @@ TEST_F(MissionRoutePlannerTest, CornerMissionLandCornerScenarioSelectsRally6OnSe
 	EXPECT_EQ(plan.safe_point_index, 6);
 	EXPECT_EQ(plan.branch_off_mission_item_index, 15);
 	EXPECT_TRUE(plan.branch_off_position.valid());
+}
+
+// ---- Plan fingerprint ----
+
+static constexpr float kFingerprintHomeAlt{488.f};
+
+enum class FingerprintMission : uint8_t {
+	kSurvey,
+	kVtolSurveyWithJump,
+	kStackedLand,
+	kSpeedCommands,
+	kVtolTransitions,
+	kNorthSouthSurvey,
+};
+
+// Lawnmower survey in rows of 12 waypoints, from a takeoff to a landing below the last waypoint.
+static std::vector<mission_item_s> makeFingerprintMission(FingerprintMission shape, int position_count)
+{
+	const bool vtol = shape == FingerprintMission::kVtolSurveyWithJump || shape == FingerprintMission::kVtolTransitions;
+	std::vector<mission_item_s> mission{makePositionItemFromOffset(kBaseLat, kBaseLon, 0.f, 0.f, kFingerprintHomeAlt + 30.f,
+					    vtol ? NAV_CMD_VTOL_TAKEOFF : NAV_CMD_TAKEOFF, false)};
+	int16_t jump_target = -1;
+
+	if (shape == FingerprintMission::kVtolSurveyWithJump) {
+		mission.push_back(makeVtolTransitionItem(kVtolFw));
+	}
+
+	for (int i = 0; i < position_count; ++i) {
+		const int row = i / 12;
+		const float north = 150.f * row + 40.f;
+		const float east = 120.f * (row % 2 == 0 ? i % 12 : 11 - i % 12) + 30.f;
+		const float alt = kFingerprintHomeAlt + 50.f + 5.f * (i % 7);
+
+		if (shape == FingerprintMission::kVtolSurveyWithJump && i == position_count / 3) {
+			jump_target = static_cast<int16_t>(mission.size());
+		}
+
+		mission.push_back(shape == FingerprintMission::kNorthSouthSurvey
+				  ? makePositionItemFromOffset(kBaseLat, kBaseLon, east, north, alt)
+				  : makePositionItemFromOffset(kBaseLat, kBaseLon, north, east, alt));
+
+		if (shape == FingerprintMission::kSpeedCommands && i % 3 == 1) {
+			mission_item_s speed_change{};
+			speed_change.nav_cmd = NAV_CMD_DO_CHANGE_SPEED;
+			mission.push_back(speed_change);
+		}
+
+		if (shape == FingerprintMission::kVtolTransitions && i % 20 == 10) {
+			mission.push_back(makeVtolTransitionItem((i / 20) % 2 ? kVtolFw : kVtolMc));
+		}
+
+		if (shape == FingerprintMission::kVtolSurveyWithJump && i == position_count / 2) {
+			mission.push_back(makeDoJump(jump_target, 2, 1));
+		}
+	}
+
+	const mission_item_s last = mission.back();
+
+	if (shape == FingerprintMission::kStackedLand) {
+		mission.push_back(makePositionItem(last.lat, last.lon, kFingerprintHomeAlt + 20.f));
+	}
+
+	if (shape == FingerprintMission::kVtolSurveyWithJump) {
+		mission.push_back(makeVtolTransitionItem(kVtolMc));
+	}
+
+	mission.push_back(makePositionItem(last.lat, last.lon, kFingerprintHomeAlt, vtol ? NAV_CMD_VTOL_LAND : NAV_CMD_LAND));
+	mission.back().autocontinue = false;
+	return mission;
+}
+
+static std::vector<mission_item_s> makeFingerprintRallyPoints(int count)
+{
+	std::vector<mission_item_s> rally_points;
+
+	for (int i = 0; i < count; ++i) {
+		rally_points.push_back(makeSafePointFromOffset(kBaseLat, kBaseLon, -300.f + 173.f * (i % 8),
+				       -250.f + 211.f * (i / 8) + 37.f * (i % 3), kFingerprintHomeAlt + 10.f));
+	}
+
+	return rally_points;
+}
+
+// Vehicles on a grid around the survey, for several mission indices, vehicle types, directions and velocities.
+static std::vector<mission_route::RtlRouteRequest> makeFingerprintRequests(const std::vector<mission_item_s> &mission)
+{
+	struct VehicleType {
+		bool is_fixed_wing;
+		bool in_transition_to_fw;
+		bool is_vtol;
+	};
+
+	// MC, FW, VTOL in FW, VTOL in MC, VTOL in front transition.
+	static constexpr VehicleType kVehicleTypes[] {
+		{false, false, false}, {true, false, false}, {true, false, true}, {false, false, true}, {false, true, true}
+	};
+	static constexpr float kVelocitiesNorthEast[][2] {{NAN, NAN}, {12.f, 3.f}, {-9.f, -14.f}};
+
+	const int32_t count = static_cast<int32_t>(mission.size());
+	int32_t jump_index = -1;
+
+	for (int32_t i = 0; i < count; ++i) {
+		if (mission[i].nav_cmd == NAV_CMD_DO_JUMP) {
+			jump_index = i;
+		}
+	}
+
+	std::vector<mission_route::RtlRouteRequest> requests;
+	mission_route::RtlRouteRequest request{};
+	request.home_altitude_amsl = kFingerprintHomeAlt;
+	request.acceptance_radius_m = 10.f;
+	request.mission_land_index = count - 1;
+	request.safe_point_projection_search_distance_m = 30.f;
+	request.direct_goal_acceptance_radius_m = 30.f;
+	request.altitude_acceptance_radius_m = 5.f;
+
+	for (int grid_north = -1; grid_north <= 8; grid_north += 3) {
+		for (int grid_east = -1; grid_east <= 11; grid_east += 3) {
+			request.vehicle_position = makePositionFromOffset(kBaseLat, kBaseLon, 97.f * grid_north + 11.f,
+						   83.f * grid_east - 7.f, kFingerprintHomeAlt + 15.f + 9.f * ((grid_north + grid_east) % 5));
+
+			for (const int32_t mission_index : {0, 1, count / 3, count / 2, count - 2, count - 1}) {
+				request.mission_index = mission_index;
+
+				for (const VehicleType &type : kVehicleTypes) {
+					request.is_fixed_wing = type.is_fixed_wing;
+					request.in_transition_to_fw = type.in_transition_to_fw;
+					request.is_vtol = type.is_vtol;
+					request.projection_search_distance_m = type.is_fixed_wing ? 150.f : 30.f;
+
+					for (const bool reversed : {false, true}) {
+						request.current_route_direction_reversed = reversed;
+
+						for (const auto &velocity : kVelocitiesNorthEast) {
+							request.velocity_north_m_s = velocity[0];
+							request.velocity_east_m_s = velocity[1];
+							request.active_jump_anchor = {};
+							requests.push_back(request);
+
+							// On the jump edge only from mid-mission, flying nominally.
+							if (jump_index >= 0 && mission_index == count / 2 && !reversed) {
+								request.active_jump_anchor = {jump_index};
+								requests.push_back(request);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return requests;
+}
+
+// 64-bit FNV-1a.
+static void hashText(uint64_t &hash, const char *text)
+{
+	for (; *text != '\0'; ++text) {
+		hash = (hash ^ static_cast<uint8_t>(*text)) * 1099511628211ULL;
+	}
+}
+
+// Hashes the plan as text; hex floats keep every bit.
+static void hashPlan(uint64_t &hash, mission_route::FailureReason status, const mission_route::MissionResumePlan &plan)
+{
+	char text[256];
+	snprintf(text, sizeof(text), "%d %d %d %d %d %d %a %a %a\n", static_cast<int>(status),
+		 static_cast<int>(plan.first_mission_item_index), plan.direction_reversed, plan.use_current_altitude,
+		 static_cast<int>(plan.active_jump_anchor.jump_item_index), static_cast<int>(plan.vtol_transition_action),
+		 plan.join_position.lat, plan.join_position.lon, static_cast<double>(plan.join_position.alt));
+	hashText(hash, text);
+}
+
+static void hashPlan(uint64_t &hash, mission_route::FailureReason status, const mission_route::RtlRoutePlan &plan)
+{
+	hashPlan(hash, status, static_cast<const mission_route::MissionResumePlan &>(plan));
+	char text[256];
+	snprintf(text, sizeof(text), "%d %d %d %d %d %a %a %a %a %a %a\n", static_cast<int>(plan.goal_type),
+		 static_cast<int>(plan.safe_point_index), static_cast<int>(plan.branch_off_mission_item_index),
+		 plan.fly_direct_to_goal, plan.geofence_prevents_shortcut, plan.goal_position.lat, plan.goal_position.lon,
+		 static_cast<double>(plan.goal_position.alt), plan.branch_off_position.lat, plan.branch_off_position.lon,
+		 static_cast<double>(plan.branch_off_position.alt));
+	hashText(hash, text);
+}
+
+// Hashes every Return and join plan of a fixed sweep. Run it with --gtest_also_run_disabled_tests before and
+// after a planner change on the same machine: equal "Plan fingerprint" hashes mean no plan changed.
+TEST_F(MissionRoutePlannerTest, DISABLED_PlanFingerprint)
+{
+	static constexpr FingerprintMission kShapes[] {
+		FingerprintMission::kSurvey, FingerprintMission::kVtolSurveyWithJump, FingerprintMission::kStackedLand,
+		FingerprintMission::kSpeedCommands, FingerprintMission::kVtolTransitions, FingerprintMission::kNorthSouthSurvey
+	};
+	uint64_t hash = 14695981039346656037ULL; // FNV-1a offset basis
+	unsigned plan_count = 0;
+
+	for (const FingerprintMission shape : kShapes) {
+		for (const int position_count : {3, 40}) {
+			const std::vector<mission_item_s> mission = makeFingerprintMission(shape, position_count);
+			const std::vector<mission_route::RtlRouteRequest> requests = makeFingerprintRequests(mission);
+
+			for (const int rally_count : {0, 3, 33}) {
+				TestPlanner planner(mission, makeFingerprintRallyPoints(rally_count));
+
+				for (const mission_route::RtlRouteRequest &request : requests) {
+					mission_route::RtlRoutePlan rtl_plan{};
+					hashPlan(hash, planner.planRtlRoute(request, rtl_plan), rtl_plan);
+					mission_route::MissionResumePlan join_plan{};
+					hashPlan(hash, planner.planMissionResumeJoin(request, join_plan), join_plan);
+					plan_count += 2;
+				}
+			}
+		}
+	}
+
+	printf("Plan fingerprint: %u plans, hash %016" PRIx64 "\n", plan_count, hash);
 }

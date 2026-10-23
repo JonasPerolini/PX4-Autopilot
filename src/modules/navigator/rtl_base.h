@@ -62,4 +62,8 @@ public:
 #if CONFIG_NAVIGATOR_GEOFENCE_AVOIDANCE
 	virtual matrix::Vector2d getRtlPlannerDestination() { return {(double)NAN, (double)NAN}; }
 #endif // CONFIG_NAVIGATOR_GEOFENCE_AVOIDANCE
+
+protected:
+	// Of the Return modes only the route follower calls startVtolTransition(); it overrides this.
+	void prepareVtolTransitionItem(bool aligning) override { (void)aligning; }
 };
