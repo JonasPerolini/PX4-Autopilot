@@ -58,8 +58,8 @@ static constexpr uint8_t kMaxSegmentCandidates{3};
 
 /** Safe points projected per route walk: larger batches trade fixed RAM for fewer walks. */
 static constexpr uint8_t kMaxSafePointBatch{CONFIG_NAVIGATOR_SAFE_POINT_BATCH_SIZE};
-static_assert(kMaxSafePointBatch >= 1 && kMaxSafePointBatch <= DM_KEY_SAFE_POINTS_MAX,
-	      "CONFIG_NAVIGATOR_SAFE_POINT_BATCH_SIZE must be 1..DM_KEY_SAFE_POINTS_MAX");
+static_assert(kMaxSafePointBatch >= 16 && kMaxSafePointBatch <= DM_KEY_SAFE_POINTS_MAX,
+	      "CONFIG_NAVIGATOR_SAFE_POINT_BATCH_SIZE must be 16..DM_KEY_SAFE_POINTS_MAX");
 
 /** @brief Key distances for a point projected onto one segment. */
 struct ProjectionDistance {
