@@ -553,6 +553,22 @@ bool canUseCurrentAltitudeForJoinTarget(const RoutePath &path, const Position &v
 	return PX4_ISFINITE(dist_to_first_item) && dist_to_first_item < acceptance_radius_m;
 }
 
+// Near landing, callers skip the branch-in point and fly to the first item at current altitude.
+// Candidate pruning only checked the segment to the branch-in point, so check this one too.
+FailureReason checkCurrentAltitudeJoin(const PathChecker &path_checker, const Position &vehicle_position,
+				       const RoutePath &path)
+{
+	Position target = path.first_item.position;
+	target.alt = vehicle_position.alt;
+	bool clear = false;
+
+	if (!path_checker.checkPath(vehicle_position, target, clear)) {
+		return FailureReason::kGeofenceUnavailable;
+	}
+
+	return clear ? FailureReason::kNone : FailureReason::kNoValidPath;
+}
+
 bool closeToBranchOffSegment(const Position &position,
 			     const GoalSelection &selection,
 			     float acceptance_radius_m,
@@ -700,19 +716,10 @@ FailureReason MissionRoutePlanner::planMissionResumeJoin(const MissionResumeRequ
 	}
 
 	if (_path_checker && candidate.use_current_altitude) {
-		// Candidate pruning already checked the segment to the projected branch-in point.
-		// Near landing, Mission skips that point and flies to the landing item at current
-		// altitude, so check this different segment too.
-		Position target = path.first_item.position;
-		target.alt = request.vehicle_position.alt;
-		bool clear = false;
+		const FailureReason join_status = checkCurrentAltitudeJoin(*_path_checker, request.vehicle_position, path);
 
-		if (!_path_checker->checkPath(request.vehicle_position, target, clear)) {
-			return FailureReason::kGeofenceUnavailable;
-		}
-
-		if (!clear) {
-			return FailureReason::kNoValidPath;
+		if (join_status != FailureReason::kNone) {
+			return join_status;
 		}
 	}
 
@@ -792,6 +799,17 @@ FailureReason MissionRoutePlanner::planRtlRoute(const RtlRouteRequest &request,
 	if (!plan.valid()) {
 		plan = {};
 		return FailureReason::kNoValidPath;
+	}
+
+	// A direct flight to the goal was checked above.
+	if (_path_checker && plan.use_current_altitude && !plan.fly_direct_to_goal) {
+		const FailureReason join_status = checkCurrentAltitudeJoin(*_path_checker, request.vehicle_position,
+						  selection.path);
+
+		if (join_status != FailureReason::kNone) {
+			plan = {};
+			return join_status;
+		}
 	}
 
 	return FailureReason::kNone;
